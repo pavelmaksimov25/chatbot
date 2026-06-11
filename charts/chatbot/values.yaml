@@ -6,13 +6,29 @@ image:
 
 replicas: 1
 
+# Store flags drive the env wiring in templates/services.yaml. Each service
+# may reach ONLY its own stores: db.user/db.name bind it to its own logical
+# database — never point two services at the same one.
 services:
   bff-gateway:
     port: 3000
+    valkey: true
   api:
     port: 3001
+    valkey: true
+    minio: true
+    vault: true
+    db:
+      user: api
+      name: conversations_db
+      passwordKey: API_DB_PASSWORD
   user-service:
     port: 3002
+    valkey: true
+    db:
+      user: user_service
+      name: users_db
+      passwordKey: USER_SERVICE_DB_PASSWORD
 
 resources:
   requests:
@@ -32,3 +48,45 @@ caddy:
     limits:
       cpu: 250m
       memory: 128Mi
+
+postgres:
+  image: postgres:17-alpine
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+valkey:
+  image: valkey/valkey:8-alpine
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+minio:
+  image: minio/minio:latest
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+vault:
+  image: hashicorp/vault:1.20
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi

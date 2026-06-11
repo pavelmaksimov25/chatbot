@@ -28,12 +28,47 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            {{- if $svc.db }}
+            - name: DB_HOST
+              value: {{ $.Release.Name }}-postgres
+            - name: DB_PORT
+              value: '5432'
+            - name: DB_USER
+              value: {{ $svc.db.user }}
+            - name: DB_NAME
+              value: {{ $svc.db.name }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-postgres
+                  key: {{ $svc.db.passwordKey }}
+            {{- end }}
+            {{- if $svc.valkey }}
+            - name: VALKEY_HOST
+              value: {{ $.Release.Name }}-valkey
+            - name: VALKEY_PORT
+              value: '6379'
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-valkey
+                  key: VALKEY_PASSWORD
+            {{- end }}
+            {{- if $svc.minio }}
+            - name: MINIO_ENDPOINT
+              value: http://{{ $.Release.Name }}-minio:9000
+            {{- end }}
+            {{- if $svc.vault }}
+            - name: VAULT_ADDR
+              value: http://{{ $.Release.Name }}-vault:8200
+            {{- end }}
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /health

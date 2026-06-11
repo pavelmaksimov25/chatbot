@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-postgres-init
+  labels:
+    app.kubernetes.io/name: postgres
+    {{- include "chatbot.labels" . | nindent 4 }}
+data:
+  # Runs once on first boot (empty data dir). One Postgres instance, two
+  # logical databases — each service role can connect ONLY to its own DB.
+  01-init-databases.sh: |
+    #!/bin/sh
+    set -eu
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+      CREATE ROLE api LOGIN PASSWORD '$API_DB_PASSWORD';
+      CREATE DATABASE conversations_db OWNER api;
+      REVOKE CONNECT ON DATABASE conversations_db FROM PUBLIC;
+      GRANT CONNECT ON DATABASE conversations_db TO api;
+
+      CREATE ROLE user_service LOGIN PASSWORD '$USER_SERVICE_DB_PASSWORD';
+      CREATE DATABASE users_db OWNER user_service;
+      REVOKE CONNECT ON DATABASE users_db FROM PUBLIC;
+      GRANT CONNECT ON DATABASE users_db TO user_service;
+    EOSQL
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: store
+    {{- include "chatbot.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ .Release.Name }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "chatbot.selectorLabels" (dict "name" "postgres" "release" .Release.Name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: store
+        {{- include "chatbot.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          ports:
+            - name: pg
+              containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-postgres
+                  key: POSTGRES_PASSWORD
+            - name: API_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-postgres
+                  key: API_DB_PASSWORD
+            - name: USER_SERVICE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-postgres
+                  key: USER_SERVICE_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'postgres']
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'postgres']
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+      volumes:
+        - name: init
+          configMap:
+            name: {{ .Release.Name }}-postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: store
+    {{- include "chatbot.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "chatbot.selectorLabels" (dict "name" "postgres" "release" .Release.Name) | nindent 4 }}
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg

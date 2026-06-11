@@ -18,8 +18,8 @@ data:
     	# the ingress. Real traffic goes to the BFF only — remove these when real
     	# routing lands.
     {{- range $name, $svc := .Values.services }}
-    	handle /healthz/{{ $name }} {
-    		rewrite * /health
+    	handle /healthz/{{ $name }}* {
+    		uri replace /healthz/{{ $name }} /health
     		reverse_proxy {{ $.Release.Name }}-{{ $name }}:{{ $svc.port }}
     	}
     {{- end }}

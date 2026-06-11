@@ -92,12 +92,20 @@ Each service answers `GET /health`.
 ### Run on Kubernetes (kind)
 
 ```sh
+cp .env.example .env  # then fill in real values (gitignored — never commit)
 make cluster-up     # create the kind cluster (host 8443 → Caddy ingress)
+make secrets        # transform .env into the k8s Secrets the cluster consumes
 make images load    # build the service images and load them into kind
 make deploy         # helm install + wait for rollout
-make verify         # curl all three health endpoints through Caddy over HTTPS
+make verify         # curl liveness + readiness of all services through Caddy
 make cluster-down   # teardown
 ```
+
+The chart also runs the in-cluster stores: Postgres (one instance, two logical
+databases — `conversations_db` for `api`, `users_db` for `user-service`; each
+service role can connect only to its own), Valkey, MinIO, and Vault with the
+Transit engine enabled (dev mode — local only). Service readiness probes verify
+connectivity to each service's own stores; liveness never touches stores.
 
 Caddy terminates TLS (self-signed via its internal CA — use `curl -k`) and proxies to the
 services. `https://localhost:8443/healthz/<service>` are skeleton-only verification routes;
