@@ -25,9 +25,21 @@ spec:
           ports:
             - name: http
               containerPort: {{ $svc.port }}
+            {{- if $svc.grpcPort }}
+            - name: grpc
+              containerPort: {{ $svc.grpcPort }}
+            {{- end }}
           env:
             - name: NODE_ENV
               value: production
+            - name: OTEL_SERVICE_NAME
+              value: {{ $name }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ tpl $.Values.observability.otlpEndpoint $ }}
+            {{- range $key, $val := $svc.env }}
+            - name: {{ $key }}
+              value: {{ tpl $val $ | quote }}
+            {{- end }}
             {{- if $svc.db }}
             - name: DB_HOST
               value: {{ $.Release.Name }}-postgres
@@ -92,4 +104,9 @@ spec:
     - name: http
       port: {{ $svc.port }}
       targetPort: http
+    {{- if $svc.grpcPort }}
+    - name: grpc
+      port: {{ $svc.grpcPort }}
+      targetPort: grpc
+    {{- end }}
 {{- end }}

@@ -13,6 +13,8 @@ services:
   bff-gateway:
     port: 3000
     valkey: true
+    env:
+      API_URL: 'http://{{ .Release.Name }}-api:3001'
   api:
     port: 3001
     valkey: true
@@ -22,8 +24,11 @@ services:
       user: api
       name: conversations_db
       passwordKey: API_DB_PASSWORD
+    env:
+      USER_SERVICE_GRPC_URL: '{{ .Release.Name }}-user-service:50051'
   user-service:
     port: 3002
+    grpcPort: 50051
     valkey: true
     db:
       user: user_service
@@ -90,3 +95,34 @@ vault:
     limits:
       cpu: 250m
       memory: 256Mi
+
+observability:
+  # OTLP/HTTP traces from every service land here (rendered with tpl).
+  otlpEndpoint: 'http://{{ .Release.Name }}-jaeger:4318'
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+  grafana:
+    image: grafana/grafana:11.6.0
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
