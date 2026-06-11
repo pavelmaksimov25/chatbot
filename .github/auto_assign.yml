@@ -1,0 +1,5 @@
+# kentaro-m/auto-assign-action config (PRs)
+addReviewers: false
+addAssignees: true
+assignees:
+  - pavelmaksimov25

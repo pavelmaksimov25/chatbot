@@ -1,0 +1,22 @@
+# actions/labeler v5 config — labels PRs by changed paths.
+# Keep path globs in sync with the monorepo layout established in Slice 1 (#1).
+'area:infra':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'charts/**'
+          - 'infra/**'
+          - '.github/**'
+'area:auth':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'apps/bff-gateway/**'
+          - 'apps/user-service/**'
+'area:chat':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'apps/api/**'
+          - 'apps/spa/**'
+'documentation':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
