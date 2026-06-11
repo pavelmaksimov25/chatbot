@@ -1,17 +1,17 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: "/"
+    directory: '/'
     schedule:
       interval: weekly
     labels:
-      - "area:infra"
+      - 'area:infra'
 
   # Activates once the slice-1 monorepo lands a package.json at the root.
   - package-ecosystem: npm
-    directory: "/"
+    directory: '/'
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     labels:
-      - "area:infra"
+      - 'area:infra'

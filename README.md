@@ -69,6 +69,22 @@ RAG / vector store (large-document chat) · branching edits · canvas-style arti
 
 ## Local development
 
-Prerequisites: Docker, `kind`, `kubectl`, `helm`, `k9s`; an Auth0 tenant; API keys for Anthropic, OpenAI, and Gemini.
+Prerequisites: Node.js ≥ 22, [pnpm](https://pnpm.io) 10; later slices add Docker, `kind`, `kubectl`, `helm`, `k9s`, an Auth0 tenant, and API keys for Anthropic, OpenAI, and Gemini.
 
-Setup instructions land with slice 1.
+```sh
+pnpm install        # install all workspaces
+pnpm dev            # start all services + SPA in watch mode
+pnpm test           # unit tests across the monorepo
+pnpm lint           # eslint
+pnpm typecheck      # tsc --noEmit per package
+pnpm build          # compile services + bundle SPA
+```
+
+| App                 | Port        | Role                                                             |
+| ------------------- | ----------- | ---------------------------------------------------------------- |
+| `apps/spa`          | 5173 (vite) | Chat UI (React)                                                  |
+| `apps/bff-gateway`  | 3000        | The only service the browser talks to — session, CSRF, SSE proxy |
+| `apps/api`          | 3001        | Domain core — chat orchestration, LLM adapters, conversations    |
+| `apps/user-service` | 3002        | App profile keyed by Auth0 `sub` (gRPC later)                    |
+
+Each service answers `GET /health`.
