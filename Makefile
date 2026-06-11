@@ -2,7 +2,7 @@ CLUSTER  := chatbot
 NS       := chatbot
 SERVICES := bff-gateway api user-service
 
-.PHONY: cluster-up cluster-down secrets images load deploy undeploy verify
+.PHONY: cluster-up cluster-down secrets images load deploy undeploy verify jaeger prometheus grafana
 
 cluster-up: ## Create the kind cluster (host 8443 → Caddy ingress)
 	kind create cluster --config infra/kind/cluster.yaml
@@ -33,3 +33,12 @@ verify: ## Hit every service liveness + readiness endpoint through the Caddy ing
 		curl -fsk https://localhost:8443/healthz/$$s || exit 1; echo; \
 		curl -fsk https://localhost:8443/healthz/$$s/ready || exit 1; echo; \
 	done
+
+jaeger: ## Port-forward the Jaeger UI → http://localhost:16686
+	kubectl --namespace $(NS) port-forward svc/chatbot-jaeger 16686:16686
+
+prometheus: ## Port-forward Prometheus → http://localhost:9090
+	kubectl --namespace $(NS) port-forward svc/chatbot-prometheus 9090:9090
+
+grafana: ## Port-forward Grafana → http://localhost:3300 (admin/admin)
+	kubectl --namespace $(NS) port-forward svc/chatbot-grafana 3300:3000

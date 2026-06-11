@@ -107,6 +107,23 @@ service role can connect only to its own), Valkey, MinIO, and Vault with the
 Transit engine enabled (dev mode — local only). Service readiness probes verify
 connectivity to each service's own stores; liveness never touches stores.
 
+### Observability
+
+Every service ships OpenTelemetry traces (OTLP) to in-cluster Jaeger, logs JSON
+via pino with `trace_id`/`span_id` injected into every line, and exposes
+Prometheus metrics on `/metrics` (scraped by in-cluster Prometheus; Grafana is
+provisioned with the Prometheus datasource — dashboards land in slice 20).
+
+`GET https://localhost:8443/ping` hops BFF → api (HTTP) → user-service (gRPC)
+and returns the nested replies — one request produces a single trace spanning
+all three services, with log lines correlated by the same trace id.
+
+```sh
+make jaeger       # Jaeger UI      → http://localhost:16686
+make prometheus   # Prometheus     → http://localhost:9090
+make grafana      # Grafana        → http://localhost:3300 (admin/admin)
+```
+
 Caddy terminates TLS (self-signed via its internal CA — use `curl -k`) and proxies to the
 services. `https://localhost:8443/healthz/<service>` are skeleton-only verification routes;
 real traffic flows through the BFF gateway at `https://localhost:8443/`.

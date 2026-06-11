@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package user.v1;
+
+// Contract between api (client) and user-service (server).
+// Keep the copies in apps/api/src/proto and apps/user-service/src/proto identical.
+service UserService {
+  // Connectivity probe used by the cross-service ping route.
+  rpc Ping (PingRequest) returns (PingReply);
+}
+
+message PingRequest {}
+
+message PingReply {
+  string service = 1;
+}
