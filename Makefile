@@ -2,10 +2,13 @@ CLUSTER  := chatbot
 NS       := chatbot
 SERVICES := bff-gateway api user-service
 
-.PHONY: cluster-up cluster-down images load deploy undeploy verify
+.PHONY: cluster-up cluster-down secrets images load deploy undeploy verify
 
 cluster-up: ## Create the kind cluster (host 8443 → Caddy ingress)
 	kind create cluster --config infra/kind/cluster.yaml
+
+secrets: ## Create k8s secrets from the local gitignored .env
+	./scripts/bootstrap-secrets.sh
 
 cluster-down: ## Delete the kind cluster
 	kind delete cluster --name $(CLUSTER)
@@ -25,7 +28,8 @@ deploy: ## Install/upgrade the Helm release and wait for rollout
 undeploy: ## Uninstall the Helm release
 	helm uninstall chatbot --namespace $(NS)
 
-verify: ## Hit every service health endpoint through the Caddy ingress (HTTPS)
+verify: ## Hit every service liveness + readiness endpoint through the Caddy ingress (HTTPS)
 	@for s in $(SERVICES); do \
 		curl -fsk https://localhost:8443/healthz/$$s || exit 1; echo; \
+		curl -fsk https://localhost:8443/healthz/$$s/ready || exit 1; echo; \
 	done

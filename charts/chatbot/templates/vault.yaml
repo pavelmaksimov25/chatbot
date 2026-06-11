@@ -1,0 +1,112 @@
+{{- /*
+Vault runs in dev mode: in-memory storage, auto-unsealed, root token from the
+chatbot-vault secret. Acceptable for the local kind cluster ONLY — keys are
+lost on pod restart. A real deployment (v2) swaps this for cloud KMS or a
+properly initialized Vault. Never run dev mode outside local.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: store
+    {{- include "chatbot.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "chatbot.selectorLabels" (dict "name" "vault" "release" .Release.Name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: store
+        {{- include "chatbot.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: vault
+          image: {{ .Values.vault.image }}
+          args: ['server', '-dev', '-dev-listen-address=0.0.0.0:8200']
+          ports:
+            - name: vault
+              containerPort: 8200
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-vault
+                  key: VAULT_DEV_ROOT_TOKEN
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: vault
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: vault
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: store
+    {{- include "chatbot.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "chatbot.selectorLabels" (dict "name" "vault" "release" .Release.Name) | nindent 4 }}
+  ports:
+    - name: vault
+      port: 8200
+      targetPort: vault
+---
+# Post-install/upgrade hook: enable the Transit engine (the KMS-analog used
+# for envelope encryption). Idempotent — skips if already enabled.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-vault-enable-transit
+  labels:
+    app.kubernetes.io/name: vault-enable-transit
+    {{- include "chatbot.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault-enable-transit
+        {{- include "chatbot.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: enable-transit
+          image: {{ .Values.vault.image }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              export VAULT_ADDR=http://{{ .Release.Name }}-vault:8200
+              until vault status >/dev/null 2>&1; do echo waiting for vault; sleep 2; done
+              if vault secrets list | grep -q '^transit/'; then
+                echo "transit engine already enabled"
+              else
+                vault secrets enable transit
+                echo "transit engine enabled"
+              fi
+          env:
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-vault
+                  key: VAULT_DEV_ROOT_TOKEN
