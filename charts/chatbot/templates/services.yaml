@@ -40,6 +40,13 @@ spec:
             - name: {{ $key }}
               value: {{ tpl $val $ | quote }}
             {{- end }}
+            {{- range $key, $ref := $svc.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ref.secret }}
+                  key: {{ $ref.key }}
+            {{- end }}
             {{- if $svc.db }}
             - name: DB_HOST
               value: {{ $.Release.Name }}-postgres

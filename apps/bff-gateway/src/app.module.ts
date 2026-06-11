@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import { AuthModule } from './auth/auth.module';
+import { CsrfGuard } from './auth/csrf.guard';
+import { SessionService } from './auth/session.service';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { PingModule } from './ping/ping.module';
@@ -17,6 +22,14 @@ import { PingModule } from './ping/ping.module';
     HealthModule,
     MetricsModule,
     PingModule,
+    AuthModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  constructor(private readonly sessionService: SessionService) {}
+
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(this.sessionService.middleware).forRoutes('{*splat}');
+  }
+}

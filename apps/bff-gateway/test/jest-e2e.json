@@ -1,0 +1,24 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.[tj]s$": [
+      "ts-jest",
+      {
+        "isolatedModules": true,
+        "tsconfig": {
+          "module": "commonjs",
+          "allowJs": true,
+          "esModuleInterop": true,
+          "ignoreDeprecations": "6.0"
+        }
+      }
+    ]
+  },
+  "transformIgnorePatterns": [
+    "/node_modules/(?!\\.pnpm)(?!(openid-client|oauth4webapi|jose)/)",
+    "/node_modules/\\.pnpm/(?!(openid-client|oauth4webapi|jose)@)"
+  ]
+}

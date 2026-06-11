@@ -107,6 +107,30 @@ service role can connect only to its own), Valkey, MinIO, and Vault with the
 Transit engine enabled (dev mode — local only). Service readiness probes verify
 connectivity to each service's own stores; liveness never touches stores.
 
+### Authentication (Auth0, BFF pattern)
+
+The browser never holds an access token. The BFF runs the OIDC authorization
+code flow + PKCE against Auth0, keeps all tokens server-side in a
+Valkey-backed session, and gives the browser only an opaque `httpOnly +
+Secure + SameSite=Lax` cookie. Mutating requests additionally require the
+session-bound `X-CSRF-Token` header. Refresh tokens rotate server-side, so
+reopening the browser silently re-authenticates while the session lives.
+Unverified email addresses are turned away at the callback (`email_verified`
+gate). Until Auth0 credentials are bootstrapped, `/auth/*` answers 503 and
+everything else runs normally.
+
+**One-time tenant setup (manual):**
+
+1. Create an Auth0 tenant + a **Regular Web Application**.
+2. Allowed Callback URLs: `https://localhost:8443/auth/callback`; Allowed
+   Logout URLs: `https://localhost:8443/`.
+3. Enable connections: Google / GitHub / Microsoft + Database
+   (email/password) with **email verification required**.
+4. Enable **Refresh Token Rotation** (and allow offline access on the API).
+5. Put `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, and a fresh
+   `SESSION_SECRET` (`openssl rand -hex 32`) into `.env`, then
+   `make secrets` and restart the BFF pod.
+
 ### Observability
 
 Every service ships OpenTelemetry traces (OTLP) to in-cluster Jaeger, logs JSON
