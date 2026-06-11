@@ -1,0 +1,22 @@
+# Local-only working documents — never commit
+HANDOFF.md
+
+# Dependencies / build output (TypeScript monorepo)
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & OS noise
+*.log
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

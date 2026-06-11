@@ -1,21 +1,74 @@
 # Chatbot
 
-A lightweight chatbot that can be easily injected into any website by a non-tech person and provides reach interface for configuration and fine-tuning.
+A standalone B2C conversational-AI web app (Claude/ChatGPT-class): streaming chat, conversation history with edit-and-regenerate, file analysis, and document export — built as a production-grade TypeScript system on Kubernetes.
 
-# Components
+> **Status:** architecture finalized, implementation starting. v1 targets a **local k8s cluster (kind + Helm)**; cloud deployment is deferred to v2.
 
-- Control Plane. SaaS UI that provides interface for configuring your chatbot.
-- Chatbot. A JS script that can be injected into a website.
+## Product (v1)
 
-### Controll Plane Components
+- Streaming chat (SSE) — Claude Sonnet 4.6 primary, OpenAI → Gemini fallback
+- Auth via Auth0: Google/GitHub/Microsoft + email/password with verification, silent re-auth
+- Conversation history: edit (regenerate from the edited message), delete, auto-welcome
+- File upload for analysis (text/PDF/images — vision input; no image generation), encrypted at rest
+- Export answers/conversations to `.docx` / `.pdf` / `.csv`
+- Follow-up suggestion chips, per-user daily usage quota
 
-- Authebtication
-- Authorization
-- User Management(low prio for first verion)
-- Chatbot Igress
-- Net IO Security
-- AI LLM Clients. Just API clients for well-known AI platforms like openAI
-- Chatbot Egress
-- Propmpt Configurator
-- Observability
-- User Profile
+## Priorities
+
+1. **Security**
+2. **Latency** + **Maintainability**
+3. Accuracy + UX
+
+Every architectural tradeoff resolves in that order.
+
+## Architecture
+
+```
+React/TS SPA
+  │
+Caddy (TLS / ingress)
+  │
+BFF gateway (NestJS) ─ Auth0 session in httpOnly cookies · CSRF · rate-limit · transparent SSE proxy
+  ├─► api (NestJS, DDD modules) ──────────── owns conversations_db
+  │     chat orchestration · LLM adapters · input/output safety ·
+  │     file control + envelope encryption · usage quotas
+  └─► user-service (NestJS, gRPC) ─────────── owns users_db
+        app profile keyed by Auth0 sub (Redis-cached)
+
+Async (BullMQ workers): output audit · docs-gen · suggestion chips · titles
+Stores (in-cluster):    Postgres (2 logical DBs) · Redis/Valkey · MinIO · Vault (Transit = KMS)
+External:               Auth0 · Anthropic / OpenAI / Gemini
+Observability:          OpenTelemetry traces · Prometheus/Grafana · pino logs (trace-correlated)
+```
+
+## Key design decisions
+
+- **BFF token model** — access tokens never reach the browser; sessions live server-side in `httpOnly + Secure + SameSite` cookies.
+- **Envelope encryption at rest** — per-user data keys encrypt files in MinIO; key-encryption key in Vault Transit. No hand-rolled crypto.
+- **Stream + async audit** — tokens stream with incremental sanitization; heavy policy checks run async. Primary security control is input-side context scoping.
+- **Availability-first LLM fallback** — provider switch only before the first token; concurrency admission from rate-limit headers (Anthropic/OpenAI) + 429 circuit-breaker (Gemini).
+- **BullMQ, not Kafka** — v1 async work is task-shaped; the synchronous chat path is in-process/gRPC. Kafka waits for a real streaming use case.
+- **Full context + prompt caching** — the active message chain is sent each turn with Anthropic prompt caching on the stable prefix.
+- **Edit = regenerate-linear** — editing truncates and regenerates; superseded messages are soft-flagged, with a schema seam for future branching.
+
+## Deferred to v2
+
+RAG / vector store (large-document chat) · branching edits · canvas-style artifacts · LLM-tool-triggered exports · long-term conversation memory · compaction · cloud deployment · paid tiers.
+
+## Build order (tracer-bullet slices)
+
+1. Walking skeleton — kind + Helm, empty services, stores, telemetry, CI
+2. Auth (Auth0 via BFF) + user profile
+3. Bare streaming chat turn (single provider) + persistence
+4. Robust LLM layer — adapters, fallback, rate-limiting, prompt caching
+5. History ops — edit-regenerate, delete, auto-welcome
+6. Files — encrypted upload, inline analysis, caps
+7. Async tail — audit, chips, titles
+8. Docs-gen export
+9. Quotas, dashboards, e2e smoke
+
+## Local development
+
+Prerequisites: Docker, `kind`, `kubectl`, `helm`, `k9s`; an Auth0 tenant; API keys for Anthropic, OpenAI, and Gemini.
+
+Setup instructions land with slice 1.
