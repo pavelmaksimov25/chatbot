@@ -1,0 +1,6 @@
+apiVersion: v2
+name: chatbot
+description: B2C conversational-AI web app — services + Caddy ingress
+type: application
+version: 0.1.0
+appVersion: '0.1.0'

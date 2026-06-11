@@ -1,0 +1,31 @@
+CLUSTER  := chatbot
+NS       := chatbot
+SERVICES := bff-gateway api user-service
+
+.PHONY: cluster-up cluster-down images load deploy undeploy verify
+
+cluster-up: ## Create the kind cluster (host 8443 → Caddy ingress)
+	kind create cluster --config infra/kind/cluster.yaml
+
+cluster-down: ## Delete the kind cluster
+	kind delete cluster --name $(CLUSTER)
+
+images: ## Build a Docker image per service
+	@for s in $(SERVICES); do \
+		docker build -t chatbot/$$s:dev --build-arg SERVICE=$$s -f infra/docker/service.Dockerfile . || exit 1; \
+	done
+
+load: ## Load the service images into kind
+	kind load docker-image $(SERVICES:%=chatbot/%:dev) --name $(CLUSTER)
+
+deploy: ## Install/upgrade the Helm release and wait for rollout
+	helm upgrade --install chatbot charts/chatbot --namespace $(NS) --create-namespace
+	kubectl --namespace $(NS) wait --for=condition=available deployment --all --timeout=180s
+
+undeploy: ## Uninstall the Helm release
+	helm uninstall chatbot --namespace $(NS)
+
+verify: ## Hit every service health endpoint through the Caddy ingress (HTTPS)
+	@for s in $(SERVICES); do \
+		curl -fsk https://localhost:8443/healthz/$$s || exit 1; echo; \
+	done

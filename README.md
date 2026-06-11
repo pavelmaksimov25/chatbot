@@ -88,3 +88,17 @@ pnpm build          # compile services + bundle SPA
 | `apps/user-service` | 3002        | App profile keyed by Auth0 `sub` (gRPC later)                    |
 
 Each service answers `GET /health`.
+
+### Run on Kubernetes (kind)
+
+```sh
+make cluster-up     # create the kind cluster (host 8443 → Caddy ingress)
+make images load    # build the service images and load them into kind
+make deploy         # helm install + wait for rollout
+make verify         # curl all three health endpoints through Caddy over HTTPS
+make cluster-down   # teardown
+```
+
+Caddy terminates TLS (self-signed via its internal CA — use `curl -k`) and proxies to the
+services. `https://localhost:8443/healthz/<service>` are skeleton-only verification routes;
+real traffic flows through the BFF gateway at `https://localhost:8443/`.

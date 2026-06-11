@@ -1,0 +1,34 @@
+image:
+  repositoryPrefix: chatbot
+  tag: dev
+  # Images are built locally and `kind load`ed — never pulled from a registry.
+  pullPolicy: Never
+
+replicas: 1
+
+services:
+  bff-gateway:
+    port: 3000
+  api:
+    port: 3001
+  user-service:
+    port: 3002
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+caddy:
+  image: caddy:2-alpine
+  nodePort: 30443
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi

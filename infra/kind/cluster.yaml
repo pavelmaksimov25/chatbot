@@ -1,0 +1,10 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: chatbot
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Host 8443 → Caddy's NodePort: https://localhost:8443 reaches the ingress.
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
