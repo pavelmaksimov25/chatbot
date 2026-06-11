@@ -15,6 +15,12 @@ services:
     valkey: true
     env:
       API_URL: 'http://{{ .Release.Name }}-api:3001'
+      APP_BASE_URL: 'https://localhost:8443'
+    secretEnv:
+      AUTH0_DOMAIN: { secret: chatbot-auth0, key: AUTH0_DOMAIN }
+      AUTH0_CLIENT_ID: { secret: chatbot-auth0, key: AUTH0_CLIENT_ID }
+      AUTH0_CLIENT_SECRET: { secret: chatbot-auth0, key: AUTH0_CLIENT_SECRET }
+      SESSION_SECRET: { secret: chatbot-auth0, key: SESSION_SECRET }
   api:
     port: 3001
     valkey: true
