@@ -1,0 +1,27 @@
+{
+  "name": "chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "B2C conversational-AI web app — TypeScript monorepo",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --recursive --parallel dev",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test",
+    "build": "pnpm --recursive build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.0"
+  }
+}
