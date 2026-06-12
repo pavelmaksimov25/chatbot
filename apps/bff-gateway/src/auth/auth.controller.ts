@@ -15,6 +15,7 @@ import type { Request, Response } from 'express';
 import './session.types';
 import { OidcService } from './oidc.service';
 import { authConfig } from './auth.config';
+import { ProfileApiClient } from '../profile/api-client.service';
 
 // Refresh ahead of expiry so a request never rides on a token that dies mid-flight.
 const REFRESH_AHEAD_MS = 60_000;
@@ -30,7 +31,10 @@ export interface MeResponse {
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly oidc: OidcService) {}
+  constructor(
+    private readonly oidc: OidcService,
+    private readonly profiles: ProfileApiClient,
+  ) {}
 
   @Get('login')
   async login(@Req() req: Request, @Res() res: Response): Promise<void> {
@@ -92,6 +96,19 @@ export class AuthController {
     };
     req.session.csrfToken = randomBytes(32).toString('hex');
     await this.save(req);
+
+    // First login provisions the app profile. Best-effort: a dead api must
+    // not block the login — /me re-ensures on its 404 fallback.
+    const { sub, email, name } = req.session.user;
+    try {
+      await this.profiles.ensureProfile(sub, email, name ?? email);
+    } catch (err) {
+      this.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'profile provisioning failed — deferred to first /me',
+      );
+    }
+
     res.redirect('/');
   }
 

@@ -3,8 +3,7 @@ import type { OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import type { Observable } from 'rxjs';
-
-export const USER_SERVICE_GRPC = 'USER_SERVICE_GRPC';
+import { USER_SERVICE_GRPC } from '../grpc/user-service-client.module';
 
 export interface PingReply {
   service: string;

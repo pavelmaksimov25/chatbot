@@ -4,6 +4,7 @@ import request from 'supertest';
 import type TestAgent from 'supertest/lib/agent';
 import { RedisContainer } from '@testcontainers/redis';
 import type { StartedRedisContainer } from '@testcontainers/redis';
+import { ApiMock } from './api-mock';
 import { OidcMock } from './oidc-mock';
 
 /**
@@ -22,12 +23,15 @@ describe('Auth0 BFF session (integration)', () => {
 
   let valkey: StartedRedisContainer;
   let oidc: OidcMock;
+  let api: ApiMock;
   let app: INestApplication;
 
   beforeAll(async () => {
     valkey = await new RedisContainer('valkey/valkey:8-alpine').start();
     oidc = new OidcMock();
     await oidc.start();
+    api = new ApiMock();
+    await api.start();
 
     process.env.VALKEY_HOST = valkey.getHost();
     process.env.VALKEY_PORT = String(valkey.getPort());
@@ -37,6 +41,7 @@ describe('Auth0 BFF session (integration)', () => {
     process.env.AUTH0_CLIENT_ID = 'test-client';
     process.env.AUTH0_CLIENT_SECRET = 'test-secret';
     process.env.APP_BASE_URL = 'http://127.0.0.1';
+    process.env.API_URL = api.url;
 
     // Import AFTER env is in place — the module reads config at load time.
     const { AppModule } = await import('../src/app.module');
@@ -49,6 +54,7 @@ describe('Auth0 BFF session (integration)', () => {
   afterAll(async () => {
     await app?.close();
     await oidc?.stop();
+    await api?.stop();
     await valkey?.stop();
   });
 
@@ -167,6 +173,96 @@ describe('Auth0 BFF session (integration)', () => {
       const me = await login(agent);
       await agent.post('/auth/logout').set('X-CSRF-Token', me.csrfToken).expect(204);
       await agent.get('/auth/me').expect(401);
+    });
+  });
+
+  describe('profile (/me)', () => {
+    beforeEach(() => {
+      api.profiles.clear();
+      api.calls.length = 0;
+    });
+
+    it('answers 401 without a session', async () => {
+      await request(app.getHttpServer()).get('/me').expect(401);
+      expect(api.calls).toHaveLength(0);
+    });
+
+    it('provisions the profile during the login callback', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+
+      const ensures = api.calls.filter((c) => c.path === '/profiles/ensure');
+      expect(ensures).toHaveLength(1);
+      expect(ensures[0].body).toMatchObject({
+        sub: 'auth0|user-1',
+        email: 'user@example.com',
+      });
+    });
+
+    it('serves the profile and re-ensures if the profile vanished', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+
+      const me = await agent.get('/me').expect(200);
+      expect(me.body).toMatchObject({ sub: 'auth0|user-1', email: 'user@example.com' });
+
+      // Losing the row must not strand the session: /me re-provisions.
+      api.profiles.clear();
+      const again = await agent.get('/me').expect(200);
+      expect(again.body).toMatchObject({ sub: 'auth0|user-1' });
+    });
+
+    it('rejects a profile edit without the CSRF token', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      api.calls.length = 0;
+
+      await agent.patch('/me').send({ displayName: 'New Name' }).expect(403);
+      expect(api.calls).toHaveLength(0); // blocked before reaching the api
+    });
+
+    it('updates the display name with a valid CSRF token', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      const res = await agent
+        .patch('/me')
+        .set('X-CSRF-Token', session.csrfToken)
+        .send({ displayName: 'New Name', preferences: { theme: 'dark' } })
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        displayName: 'New Name',
+        preferences: { theme: 'dark' },
+      });
+      // The sub is taken from the session, never from the request body.
+      const patches = api.calls.filter((c) => c.method === 'PATCH');
+      expect(patches).toHaveLength(1);
+      expect(patches[0].path).toBe(`/profiles/${encodeURIComponent('auth0|user-1')}`);
+    });
+
+    it('translates an api validation error into a 400', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      await agent
+        .patch('/me')
+        .set('X-CSRF-Token', session.csrfToken)
+        .send({ displayName: '   ' })
+        .expect(400);
+    });
+
+    it('rejects malformed bodies before calling the api', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+      api.calls.length = 0;
+
+      await agent
+        .patch('/me')
+        .set('X-CSRF-Token', session.csrfToken)
+        .send({ preferences: [1, 2, 3] })
+        .expect(400);
+      expect(api.calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
     });
   });
 

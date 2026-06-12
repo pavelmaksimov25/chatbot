@@ -131,6 +131,19 @@ everything else runs normally.
    `SESSION_SECRET` (`openssl rand -hex 32`) into `.env`, then
    `make secrets` and restart the BFF pod.
 
+### User profiles
+
+The application profile (display name, free-form preferences) lives in
+`users_db`, owned by user-service and keyed by the Auth0 `sub` — Auth0 keeps
+the credentials, user-service keeps everything else. The first login
+provisions the profile automatically (the `/me` read re-provisions if that
+ever failed). The SPA talks only to the BFF: `GET /me` returns the profile,
+`PATCH /me` edits it (CSRF-guarded); the `sub` always comes from the session,
+never from the request. Between the api and user-service the profile travels
+over gRPC, but reads are served from a Valkey cache (`profile:<sub>`, 5 min
+TTL) so the future chat hot path never pays a per-message gRPC round trip —
+writes go through user-service and refresh the cache entry in place.
+
 ### Observability
 
 Every service ships OpenTelemetry traces (OTLP) to in-cluster Jaeger, logs JSON

@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import { Pool } from 'pg';
-import Redis from 'ioredis';
+import { CacheModule } from '../cache/cache.module';
 import { HealthController } from './health.controller';
-import { PG_POOL, VALKEY, StoreHealthService } from './store-health.service';
+import { PG_POOL, StoreHealthService } from './store-health.service';
 
 @Module({
-  imports: [TerminusModule],
+  imports: [TerminusModule, CacheModule],
   controllers: [HealthController],
   providers: [
     {
@@ -20,17 +20,6 @@ import { PG_POOL, VALKEY, StoreHealthService } from './store-health.service';
           database: process.env.DB_NAME,
           max: 2,
           connectionTimeoutMillis: 2000,
-        }),
-    },
-    {
-      provide: VALKEY,
-      useFactory: () =>
-        new Redis({
-          host: process.env.VALKEY_HOST,
-          port: Number(process.env.VALKEY_PORT ?? 6379),
-          password: process.env.VALKEY_PASSWORD,
-          lazyConnect: true,
-          maxRetriesPerRequest: 1,
         }),
     },
     StoreHealthService,

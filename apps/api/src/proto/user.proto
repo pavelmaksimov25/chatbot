@@ -7,10 +7,49 @@ package user.v1;
 service UserService {
   // Connectivity probe used by the cross-service ping route.
   rpc Ping (PingRequest) returns (PingReply);
+
+  // Get-or-create the application profile for an Auth0 subject. Called on
+  // login; idempotent. Never overwrites a user-chosen display name.
+  rpc EnsureProfile (EnsureProfileRequest) returns (Profile);
+
+  // NOT_FOUND if the subject has never been provisioned.
+  rpc GetProfile (GetProfileRequest) returns (Profile);
+
+  // Partial update; absent fields are left unchanged.
+  // NOT_FOUND if missing, INVALID_ARGUMENT on bad input.
+  rpc UpdateProfile (UpdateProfileRequest) returns (Profile);
 }
 
 message PingRequest {}
 
 message PingReply {
   string service = 1;
+}
+
+message EnsureProfileRequest {
+  string sub = 1;
+  string email = 2;
+  // Initial display name (IdP name or email); ignored if the profile exists.
+  string display_name = 3;
+}
+
+message GetProfileRequest {
+  string sub = 1;
+}
+
+message UpdateProfileRequest {
+  string sub = 1;
+  optional string display_name = 2;
+  // Free-form preferences bag; must parse as a JSON object.
+  optional string preferences_json = 3;
+}
+
+message Profile {
+  string sub = 1;
+  string email = 2;
+  string display_name = 3;
+  // JSON-encoded object — the schema is owned by the SPA, not the services.
+  string preferences_json = 4;
+  string created_at = 5; // ISO 8601
+  string updated_at = 6; // ISO 8601
 }
