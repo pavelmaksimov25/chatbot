@@ -18,6 +18,7 @@ import type { Conversation, ConversationListItem, MessageRecord } from './conver
 
 interface SendMessageBody {
   content?: unknown;
+  fileIds?: unknown;
 }
 
 export interface MessageView {
@@ -25,6 +26,7 @@ export interface MessageView {
   role: string;
   content: string;
   seq: number;
+  fileIds: string[];
   createdAt: string;
 }
 
@@ -68,7 +70,7 @@ export class ChatController {
     @Body() body: SendMessageBody,
     @Res() res: Response,
   ): Promise<void> {
-    await this.pipeStream(res, this.chat.streamTurn(userSub(req), id, body.content));
+    await this.pipeStream(res, this.chat.streamTurn(userSub(req), id, body.content, body.fileIds));
   }
 
   @Post(':id/messages/:messageId/edit')
@@ -152,6 +154,7 @@ function toView(message: MessageRecord): MessageView {
     role: message.role,
     content: message.content,
     seq: message.seq,
+    fileIds: message.fileIds,
     createdAt: message.createdAt.toISOString(),
   };
 }

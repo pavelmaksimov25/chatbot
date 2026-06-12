@@ -13,6 +13,8 @@ import { LLM_ADAPTER } from '../llm/llm-adapter';
 import { FakeLlmAdapter } from '../llm/fake.adapter';
 import { ProfileService } from '../profile/profile.service';
 import type { Profile } from '../profile/profile.service';
+import { FileService } from '../files/file.service';
+import { NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(120_000);
 
@@ -43,6 +45,11 @@ describe('ChatController (integration)', () => {
   let llm: FakeLlmAdapter;
   // null = no profile provisioned → the generic system prompt.
   let profile: Profile | null = null;
+  // Owner-scoped in-memory stand-in for the (separately tested) envelope.
+  const storedFiles = new Map<
+    string,
+    { owner: string; name: string; mime: string; content: Buffer }
+  >();
 
   const asAlice = { 'x-user-sub': 'auth0|alice' };
 
@@ -68,6 +75,28 @@ describe('ChatController (integration)', () => {
                 : Promise.reject(Object.assign(new Error('not found'), { code: 5 })),
           },
         },
+        {
+          provide: FileService,
+          useValue: {
+            getMeta: (sub: string, id: string) => {
+              const file = storedFiles.get(id);
+              if (!file || file.owner !== sub) {
+                return Promise.reject(new NotFoundException('file not found'));
+              }
+              return Promise.resolve({ id, name: file.name, mime: file.mime });
+            },
+            download: (sub: string, id: string) => {
+              const file = storedFiles.get(id);
+              if (!file || file.owner !== sub) {
+                return Promise.reject(new NotFoundException('file not found'));
+              }
+              return Promise.resolve({
+                meta: { id, name: file.name, mime: file.mime },
+                content: file.content,
+              });
+            },
+          },
+        },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -86,6 +115,7 @@ describe('ChatController (integration)', () => {
     llm.requests.length = 0;
     llm.replay(['Hello', ' there', '!']);
     profile = null;
+    storedFiles.clear();
   });
 
   async function createConversation(): Promise<string> {
@@ -494,6 +524,162 @@ describe('ChatController (integration)', () => {
         .post(`/conversations/${conversationId}/welcome`)
         .set({ 'x-user-sub': 'auth0|mallory' })
         .expect(404);
+    });
+  });
+
+  describe('file-in-chat (attachments)', () => {
+    const PNG = Buffer.from('89504e470d0a1a0a-fake-image-bytes', 'utf8');
+    const IMG_ID = '11111111-1111-4111-8111-111111111111';
+    const DOC_ID = '22222222-2222-4222-8222-222222222222';
+    const NOTES_ID = '33333333-3333-4333-8333-333333333333';
+    const FOREIGN_ID = '44444444-4444-4444-8444-444444444444';
+
+    beforeEach(() => {
+      storedFiles.set(IMG_ID, {
+        owner: 'auth0|alice',
+        name: 'screenshot.png',
+        mime: 'image/png',
+        content: PNG,
+      });
+      storedFiles.set(DOC_ID, {
+        owner: 'auth0|alice',
+        name: 'spec.pdf',
+        mime: 'application/pdf',
+        content: Buffer.from('%PDF-1.4 fake'),
+      });
+      storedFiles.set(NOTES_ID, {
+        owner: 'auth0|alice',
+        name: 'notes.txt',
+        mime: 'text/plain',
+        content: Buffer.from('remember the milk'),
+      });
+    });
+
+    it('passes an attached image to the provider as vision input', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'what does this error mean?', fileIds: [IMG_ID] })
+        .expect(200);
+
+      const sent = llm.requests.at(-1)!.messages.at(-1)!;
+      expect(Array.isArray(sent.content)).toBe(true);
+      const parts = sent.content as {
+        type: string;
+        mime?: string;
+        dataBase64?: string;
+        text?: string;
+      }[];
+      expect(parts[0]).toEqual({
+        type: 'image',
+        mime: 'image/png',
+        dataBase64: PNG.toString('base64'),
+      });
+      expect(parts.at(-1)).toEqual({ type: 'text', text: 'what does this error mean?' });
+    });
+
+    it('maps documents and text attachments to their part types', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'summarize both', fileIds: [DOC_ID, NOTES_ID] })
+        .expect(200);
+
+      const parts = llm.requests.at(-1)!.messages.at(-1)!.content as {
+        type: string;
+        name?: string;
+        text?: string;
+      }[];
+      expect(parts[0]).toMatchObject({ type: 'document', name: 'spec.pdf' });
+      expect(parts[1].type).toBe('text');
+      expect(parts[1].text).toContain('notes.txt');
+      expect(parts[1].text).toContain('remember the milk');
+    });
+
+    it('persists the association — attachments survive a reload', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'about this image', fileIds: [IMG_ID] })
+        .expect(200);
+
+      const messages = await request(app.getHttpServer())
+        .get(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .expect(200);
+      const userMessage = (messages.body as { role: string; fileIds: string[] }[]).find(
+        (m) => m.role === 'user',
+      )!;
+      expect(userMessage.fileIds).toEqual([IMG_ID]);
+
+      // The NEXT turn re-assembles with the attachment still in context.
+      llm.requests.length = 0;
+      llm.replay(['follow-up answer']);
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'tell me more' })
+        .expect(200);
+      const earlier = llm.requests[0].messages.find((m) => Array.isArray(m.content))!;
+      expect((earlier.content as { type: string }[])[0].type).toBe('image');
+    });
+
+    it("refuses another user's file id BEFORE persisting the message", async () => {
+      storedFiles.set(FOREIGN_ID, {
+        owner: 'auth0|someone-else',
+        name: 'theirs.png',
+        mime: 'image/png',
+        content: PNG,
+      });
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'show me', fileIds: [FOREIGN_ID] })
+        .expect(404);
+
+      const { rows } = await pool.query('SELECT count(*)::int AS n FROM messages');
+      expect(rows[0].n).toBe(0);
+      expect(llm.requests).toHaveLength(0);
+    });
+
+    it('rejects malformed fileIds with 400', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'x', fileIds: IMG_ID })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'x', fileIds: ['a', 'b', 'c', 'd', 'e'] })
+        .expect(400);
+    });
+
+    it('degrades gracefully when an attached file was deleted later', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'about this image', fileIds: [IMG_ID] })
+        .expect(200);
+
+      storedFiles.delete(IMG_ID); // deleted between turns
+      llm.requests.length = 0;
+      llm.replay(['degraded answer']);
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'still there?' })
+        .expect(200);
+
+      const earlier = llm.requests[0].messages.find((m) => Array.isArray(m.content))!;
+      const parts = earlier.content as { type: string; text?: string }[];
+      expect(parts[0].text).toContain('no longer available');
     });
   });
 

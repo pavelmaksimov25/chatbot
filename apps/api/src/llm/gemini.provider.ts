@@ -29,7 +29,14 @@ export class GeminiProvider implements LlmProvider {
         model: modelFor('gemini', request.tier),
         contents: request.messages.map((m) => ({
           role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
+          parts:
+            typeof m.content === 'string'
+              ? [{ text: m.content }]
+              : m.content.map((part) =>
+                  part.type === 'text'
+                    ? { text: part.text }
+                    : { inlineData: { mimeType: part.mime, data: part.dataBase64 } },
+                ),
         })),
         config: {
           systemInstruction: request.system,

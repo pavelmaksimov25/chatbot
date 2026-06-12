@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '../db/db.module';
+import { FileModule } from '../files/file.module';
 import { AdmissionControlledAdapter } from '../llm/admission.adapter';
 import { AnthropicProvider } from '../llm/anthropic.provider';
 import { FallbackLlmAdapter } from '../llm/fallback.adapter';
@@ -13,7 +14,7 @@ import { ChatService } from './chat.service';
 import { ConversationRepository } from './conversation.repository';
 
 @Module({
-  imports: [DbModule, ProfileModule],
+  imports: [DbModule, FileModule, ProfileModule],
   controllers: [ChatController],
   providers: [
     ChatService,

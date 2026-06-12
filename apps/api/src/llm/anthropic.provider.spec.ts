@@ -95,6 +95,39 @@ describe('AnthropicProvider prompt caching', () => {
     await expect(run([{ role: 'user', content: 'q' }])).resolves.toEqual(['hello']);
   });
 
+  it('maps multimodal parts to Anthropic image/document blocks with the cache breakpoint last', async () => {
+    armSdk([MESSAGE_START, DELTA]);
+    const out: string[] = [];
+    for await (const chunk of provider.streamChat({
+      system: 'stable prefix',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', mime: 'image/png', dataBase64: 'aW1n' },
+            { type: 'document', mime: 'application/pdf', dataBase64: 'cGRm', name: 'spec.pdf' },
+            { type: 'text', text: 'what do these say?' },
+          ],
+        },
+      ],
+    })) {
+      out.push(chunk);
+    }
+    expect(out).toEqual(['hello']);
+
+    const params = createMock.mock.calls[0][0];
+    expect(params.messages[0].content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1n' } },
+      {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: 'cGRm' },
+        title: 'spec.pdf',
+      },
+      // The breakpoint stays on the LAST part — the growing prefix rule.
+      { type: 'text', text: 'what do these say?', cache_control: { type: 'ephemeral' } },
+    ]);
+  });
+
   it('surfaces cache effectiveness in the log line and prometheus counters', async () => {
     await run([{ role: 'user', content: 'q' }]);
 

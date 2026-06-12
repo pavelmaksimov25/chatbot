@@ -53,6 +53,9 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
     if (/^\/conversations\/[^/]+\/welcome$/.test(url) && method === 'POST') {
       return Promise.resolve(sseResponse(welcomeFrames));
     }
+    if (url === '/files' && method === 'POST') {
+      return Promise.resolve(Response.json({ id: 'file-9', name: 'shot.png' }, { status: 201 }));
+    }
     const messages = /^\/conversations\/([^/]+)\/messages(?:\/[^/]+\/edit)?$/.exec(url);
     if (messages && method === 'POST') {
       return Promise.resolve(sseResponse(frames));
@@ -148,6 +151,34 @@ describe('Chat', () => {
 
     expect(await screen.findByText('Hi Alice, welcome!')).toBeDefined();
     expect(localStorage.getItem('conversationId')).toBe('conv-1');
+  });
+
+  it('attaches an uploaded file to the next message', async () => {
+    const mock = resumedStub({
+      frames: [
+        'event: chunk\ndata: {"text":"That screenshot shows a 404 error."}\n\n',
+        'event: done\ndata: {"userMessageId":"u9","assistantMessageId":"a9"}\n\n',
+      ],
+    });
+    render(<Chat csrfToken="token" />);
+    await screen.findByRole('button', { name: 'Send' });
+
+    const file = new File(['png-bytes'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText(/Attach/), { target: { files: [file] } });
+    expect(await screen.findByText(/📎 shot\.png/)).toBeDefined();
+
+    await sendMessage('what does this error mean?');
+
+    expect(await screen.findByText('That screenshot shows a 404 error.')).toBeDefined();
+    const send = mock.mock.calls.find(
+      ([url, init]) => String(url).endsWith('/messages') && init?.method === 'POST',
+    );
+    expect(JSON.parse(send![1]!.body as string)).toEqual({
+      content: 'what does this error mean?',
+      fileIds: ['file-9'],
+    });
+    // The chip stays on the sent message; the pending slot is cleared.
+    expect(screen.getByText(/📎 shot\.png/)).toBeDefined();
   });
 
   it('streams a fresh greeting when New chat is clicked', async () => {

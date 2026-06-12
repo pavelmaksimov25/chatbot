@@ -106,6 +106,15 @@ export class FileService {
     return (await this.files.listFiles(userSub)).map(toView);
   }
 
+  /** Metadata-only ownership check — no decryption, foreign = 404. */
+  async getMeta(userSub: string, fileId: string): Promise<FileView> {
+    const record = await this.files.getFile(fileId, userSub);
+    if (!record) {
+      throw new NotFoundException('file not found');
+    }
+    return toView(record);
+  }
+
   /** KEK rotation: new key version in Vault, every DEK re-wrapped — file ciphertext untouched. */
   async rotateKek(): Promise<{ rewrapped: number }> {
     await this.vault.rotateKek();

@@ -1,6 +1,12 @@
+/** One piece of a multimodal message — providers map these to their wire shapes. */
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mime: string; dataBase64: string }
+  | { type: 'document'; mime: string; dataBase64: string; name?: string };
+
 export interface ChatTurnMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ContentPart[];
 }
 
 /**
