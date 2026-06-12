@@ -5,7 +5,24 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
-## Slice 7 — Streaming chat turn
+## Slice 8 — Conversation history
+
+- **Deleting a conversation is a hard `DELETE` (messages go via FK cascade),
+  not a soft delete.** The issue says "conversation + messages removed", and
+  user-initiated deletion of their own data should actually delete it. Soft
+  flags in this codebase (`messages.active`) exist for *edit supersession*
+  semantics, not deletion — conflating the two would make "delete my data"
+  a lie.
+- **The sidebar label is `title ?? preview`**, where `preview` is the first
+  80 chars of the first active user message, computed in the list query.
+  Generated titles are slice 17; shipping a list of "Untitled" rows until
+  then is needless UX damage for one subquery.
+- **List ordering is `updated_at DESC`** (most recently *touched*, not most
+  recently created) — matches every mainstream chat product; `updated_at` is
+  already bumped on each append from slice 7.
+- **The SPA refreshes the sidebar after each completed turn** instead of
+  optimistically reordering — one cheap GET against a BFF-local route, zero
+  client-side ordering logic to get wrong.
 
 - **Model `claude-sonnet-4-6`, thinking off, `max_tokens` 1024 (env-overridable
   `LLM_MODEL` / `LLM_MAX_TOKENS`).** The roadmap pins Sonnet for chat (fast
