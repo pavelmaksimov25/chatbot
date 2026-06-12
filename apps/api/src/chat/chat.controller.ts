@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   HttpException,
   Param,
   Post,
@@ -12,7 +14,11 @@ import {
 import type { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
 import { ChatService } from './chat.service';
-import type { Conversation, MessageRecord } from './conversation.repository';
+import type {
+  Conversation,
+  ConversationListItem,
+  MessageRecord,
+} from './conversation.repository';
 
 interface SendMessageBody {
   content?: unknown;
@@ -40,6 +46,17 @@ export class ChatController {
   @Post()
   create(@Req() req: Request): Promise<Conversation> {
     return this.chat.createConversation(userSub(req));
+  }
+
+  @Get()
+  index(@Req() req: Request): Promise<ConversationListItem[]> {
+    return this.chat.listConversations(userSub(req));
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Req() req: Request, @Param('id') id: string): Promise<void> {
+    await this.chat.deleteConversation(userSub(req), id);
   }
 
   @Get(':id/messages')

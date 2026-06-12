@@ -73,6 +73,23 @@ export class ApiMock {
       return json(res, 201, { id: 'conv-1', userSub: req.headers['x-user-sub'], title: null });
     }
 
+    if (req.method === 'GET' && path === '/conversations') {
+      return json(res, 200, [
+        { id: 'conv-2', title: null, preview: 'newer conversation' },
+        { id: 'conv-1', title: null, preview: 'older conversation' },
+      ]);
+    }
+
+    const convDelete = /^\/conversations\/([^/]+)$/.exec(path);
+    if (convDelete && req.method === 'DELETE') {
+      if (convDelete[1] === 'conv-1') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      return json(res, 404, { message: 'conversation not found' });
+    }
+
     const convMessages = /^\/conversations\/([^/]+)\/messages$/.exec(path);
     if (convMessages && req.method === 'GET') {
       return json(res, 200, [

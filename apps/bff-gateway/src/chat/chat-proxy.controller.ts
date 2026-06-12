@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -25,6 +26,26 @@ export class ChatProxyController {
     const sub = requireSub(req);
     const upstream = await this.api('/conversations', sub, { method: 'POST' });
     res.status(upstream.status).json(await upstream.json());
+  }
+
+  @Get()
+  async list(@Req() req: Request, @Res() res: Response): Promise<void> {
+    const sub = requireSub(req);
+    const upstream = await this.api('/conversations', sub);
+    res.status(upstream.status).json(await upstream.json());
+  }
+
+  @Delete(':id')
+  async remove(@Req() req: Request, @Res() res: Response, @Param('id') id: string): Promise<void> {
+    const sub = requireSub(req);
+    const upstream = await this.api(`/conversations/${encodeURIComponent(id)}`, sub, {
+      method: 'DELETE',
+    });
+    if (upstream.status === 204) {
+      res.status(204).end();
+      return;
+    }
+    res.status(upstream.status).json(await upstream.json().catch(() => ({})));
   }
 
   @Get(':id/messages')

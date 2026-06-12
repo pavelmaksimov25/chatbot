@@ -2,7 +2,11 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import type { ChatTurnMessage, LlmAdapter } from '../llm/llm-adapter';
 import { ConversationRepository } from './conversation.repository';
-import type { Conversation, MessageRecord } from './conversation.repository';
+import type {
+  Conversation,
+  ConversationListItem,
+  MessageRecord,
+} from './conversation.repository';
 import { checkInput } from './input-safety';
 import { StreamSanitizer } from './stream-sanitizer';
 
@@ -30,6 +34,17 @@ export class ChatService {
 
   createConversation(userSub: string): Promise<Conversation> {
     return this.conversations.createConversation(userSub);
+  }
+
+  listConversations(userSub: string): Promise<ConversationListItem[]> {
+    return this.conversations.listConversations(userSub);
+  }
+
+  async deleteConversation(userSub: string, conversationId: string): Promise<void> {
+    const deleted = await this.conversations.deleteConversation(conversationId, userSub);
+    if (!deleted) {
+      throw new NotFoundException('conversation not found');
+    }
   }
 
   async listMessages(userSub: string, conversationId: string): Promise<MessageRecord[]> {

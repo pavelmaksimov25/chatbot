@@ -11,6 +11,15 @@ export interface Conversation {
   updatedAt: Date;
 }
 
+export interface ConversationListItem {
+  id: string;
+  title: string | null;
+  /** First active user message, truncated — the sidebar fallback until titles land (slice 17). */
+  preview: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type MessageRole = 'user' | 'assistant';
 
 export interface MessageRecord {
@@ -86,6 +95,42 @@ export class ConversationRepository implements OnModuleInit {
       [userSub],
     );
     return toConversation(rows[0]);
+  }
+
+  /** Most recently touched first; previews come from the first active user message. */
+  async listConversations(userSub: string): Promise<ConversationListItem[]> {
+    const { rows } = await this.pool.query<{
+      id: string;
+      title: string | null;
+      preview: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      `SELECT c.id, c.title, c.created_at, c.updated_at,
+              (SELECT left(m.content, 80) FROM messages m
+                WHERE m.conversation_id = c.id AND m.role = 'user' AND m.active
+                ORDER BY m.seq LIMIT 1) AS preview
+         FROM conversations c
+        WHERE c.user_sub = $1
+        ORDER BY c.updated_at DESC`,
+      [userSub],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      preview: row.preview,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  /** Hard delete; messages go with it (FK CASCADE). Foreign = not found. */
+  async deleteConversation(id: string, userSub: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      'DELETE FROM conversations WHERE id = $1 AND user_sub = $2',
+      [id, userSub],
+    );
+    return (rowCount ?? 0) > 0;
   }
 
   /** Ownership is part of the lookup — a foreign conversation is "not found". */

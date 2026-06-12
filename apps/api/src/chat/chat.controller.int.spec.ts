@@ -203,6 +203,67 @@ describe('ChatController (integration)', () => {
     expect(rows.map((r) => r.role)).toEqual(['user']);
   });
 
+  it('lists only own conversations, most recently touched first, with previews', async () => {
+    const older = await createConversation();
+    await request(app.getHttpServer())
+      .post(`/conversations/${older}/messages`)
+      .set(asAlice)
+      .send({ content: 'about kubernetes networking' })
+      .expect(200);
+    const newer = await createConversation();
+    llm.replay(['hi!']);
+    await request(app.getHttpServer())
+      .post(`/conversations/${newer}/messages`)
+      .set(asAlice)
+      .send({ content: 'about valkey caching' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set({ 'x-user-sub': 'auth0|someone-else' })
+      .expect(201);
+
+    const res = await request(app.getHttpServer()).get('/conversations').set(asAlice).expect(200);
+    const list = res.body as { id: string; preview: string | null }[];
+    expect(list.map((c) => c.id)).toEqual([newer, older]);
+    expect(list[0].preview).toBe('about valkey caching');
+    expect(list[1].preview).toBe('about kubernetes networking');
+  });
+
+  it('deletes a conversation and its messages for good', async () => {
+    const conversationId = await createConversation();
+    await request(app.getHttpServer())
+      .post(`/conversations/${conversationId}/messages`)
+      .set(asAlice)
+      .send({ content: 'to be deleted' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/conversations/${conversationId}`)
+      .set(asAlice)
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .get(`/conversations/${conversationId}/messages`)
+      .set(asAlice)
+      .expect(404);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM messages');
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("refuses to delete another user's conversation", async () => {
+    const conversationId = await createConversation();
+    await request(app.getHttpServer())
+      .delete(`/conversations/${conversationId}`)
+      .set({ 'x-user-sub': 'auth0|mallory' })
+      .expect(404);
+    // Still there for the owner.
+    await request(app.getHttpServer())
+      .get(`/conversations/${conversationId}/messages`)
+      .set(asAlice)
+      .expect(200);
+  });
+
   it('fails as a plain 502 when the provider dies before the first token', async () => {
     const conversationId = await createConversation();
     llm.replay([], 0);

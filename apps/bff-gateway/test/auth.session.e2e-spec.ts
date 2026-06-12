@@ -331,6 +331,34 @@ describe('Auth0 BFF session (integration)', () => {
         'Hello world',
       ]);
     });
+
+    it('lists conversations through the proxy', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      const res = await agent.get('/conversations').expect(200);
+      expect((res.body as { id: string }[]).map((c) => c.id)).toEqual(['conv-2', 'conv-1']);
+    });
+
+    it('requires the CSRF token to delete a conversation', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      api.calls.length = 0;
+      await agent.delete('/conversations/conv-1').expect(403);
+      expect(api.calls).toHaveLength(0);
+    });
+
+    it('deletes a conversation and relays the upstream 404', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+      await agent
+        .delete('/conversations/conv-1')
+        .set('X-CSRF-Token', session.csrfToken)
+        .expect(204);
+      await agent
+        .delete('/conversations/conv-unknown')
+        .set('X-CSRF-Token', session.csrfToken)
+        .expect(404);
+    });
   });
 
   describe('silent re-auth (refresh rotation)', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import { readSse } from './sse';
 
@@ -7,41 +7,89 @@ interface ChatMessage {
   content: string;
 }
 
+interface ConversationItem {
+  id: string;
+  title: string | null;
+  preview: string | null;
+}
+
 const CONVERSATION_KEY = 'conversationId';
 
 export function Chat({ csrfToken }: { csrfToken: string }) {
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const conversationRef = useRef<string | null>(localStorage.getItem(CONVERSATION_KEY));
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeRef = useRef<string | null>(null);
 
-  // A reload resumes the conversation whose id we kept (a non-secret UUID).
-  useEffect(() => {
-    const conversationId = conversationRef.current;
-    if (!conversationId) {
+  const refreshList = useCallback(async (): Promise<ConversationItem[]> => {
+    const res = await fetch('/conversations').catch(() => null);
+    if (!res?.ok) {
+      return [];
+    }
+    const list = (await res.json()) as ConversationItem[];
+    setConversations(list);
+    return list;
+  }, []);
+
+  const openConversation = useCallback(async (id: string): Promise<void> => {
+    activeRef.current = id;
+    setActiveId(id);
+    localStorage.setItem(CONVERSATION_KEY, id);
+    setError(null);
+    const res = await fetch(`/conversations/${encodeURIComponent(id)}/messages`).catch(() => null);
+    if (res?.status === 404) {
+      // Deleted elsewhere; fall back to a fresh chat.
+      startNewChat();
       return;
     }
-    let cancelled = false;
-    void fetch(`/conversations/${encodeURIComponent(conversationId)}/messages`)
-      .then(async (res) => {
-        if (res.status === 404) {
-          conversationRef.current = null;
-          localStorage.removeItem(CONVERSATION_KEY);
-          return null;
-        }
-        return res.ok ? ((await res.json()) as ChatMessage[]) : null;
-      })
-      .catch(() => null)
-      .then((history) => {
-        if (!cancelled && history) {
-          setMessages(history.map(({ role, content }) => ({ role, content })));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (res?.ok) {
+      const history = (await res.json()) as ChatMessage[];
+      // Ignore the response if the user switched again while it loaded.
+      if (activeRef.current === id) {
+        setMessages(history.map(({ role, content }) => ({ role, content })));
+      }
+    }
   }, []);
+
+  const startNewChat = (): void => {
+    activeRef.current = null;
+    setActiveId(null);
+    setMessages([]);
+    setError(null);
+    localStorage.removeItem(CONVERSATION_KEY);
+  };
+
+  // A reload resumes the last open conversation (a non-secret UUID).
+  useEffect(() => {
+    void refreshList().then((list) => {
+      const stored = localStorage.getItem(CONVERSATION_KEY);
+      if (stored && list.some((c) => c.id === stored)) {
+        void openConversation(stored);
+      } else if (stored && stored !== activeRef.current) {
+        // Stale id from a conversation deleted elsewhere — but never clear an
+        // id a concurrent send just created (the list fetch predates it).
+        localStorage.removeItem(CONVERSATION_KEY);
+      }
+    });
+  }, [refreshList, openConversation]);
+
+  const removeConversation = async (id: string): Promise<void> => {
+    const res = await fetch(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken },
+    }).catch(() => null);
+    if (res?.status !== 204) {
+      setError('the conversation could not be deleted');
+      return;
+    }
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeRef.current === id) {
+      startNewChat();
+    }
+  };
 
   const send = async (): Promise<void> => {
     const content = input.trim();
@@ -66,7 +114,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       );
 
     try {
-      if (!conversationRef.current) {
+      if (!activeRef.current) {
         const created = await fetch('/conversations', {
           method: 'POST',
           headers: { 'X-CSRF-Token': csrfToken },
@@ -74,12 +122,14 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
         if (!created.ok) {
           throw new Error('could not start a conversation');
         }
-        conversationRef.current = ((await created.json()) as { id: string }).id;
-        localStorage.setItem(CONVERSATION_KEY, conversationRef.current);
+        const id = ((await created.json()) as { id: string }).id;
+        activeRef.current = id;
+        setActiveId(id);
+        localStorage.setItem(CONVERSATION_KEY, id);
       }
 
       const res = await fetch(
-        `/conversations/${encodeURIComponent(conversationRef.current)}/messages`,
+        `/conversations/${encodeURIComponent(activeRef.current)}/messages`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
@@ -98,6 +148,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
           throw new Error(typeof data.message === 'string' ? data.message : 'stream failed');
         }
       }
+      void refreshList(); // ordering + preview may have changed
     } catch (err) {
       dropEmptyAnswer();
       setError(err instanceof Error ? err.message : 'something went wrong');
@@ -107,40 +158,68 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
   };
 
   return (
-    <section aria-label="Chat">
-      <ol>
-        {messages.map((message, i) => (
-          <li key={i} data-role={message.role}>
-            {message.role === 'assistant' ? (
-              // react-markdown renders to React elements — model output is
-              // never injected as raw HTML (CSP is the second net).
-              <Markdown>{message.content}</Markdown>
-            ) : (
-              <p>{message.content}</p>
-            )}
-          </li>
-        ))}
-      </ol>
-      {error && <p role="alert">{error}</p>}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send();
-        }}
-      >
-        <label>
-          Message{' '}
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            rows={3}
-            maxLength={8000}
-          />
-        </label>{' '}
-        <button type="submit" disabled={streaming || input.trim().length === 0}>
-          {streaming ? 'Answering…' : 'Send'}
+    <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start' }}>
+      <nav aria-label="Conversations">
+        <button onClick={startNewChat} disabled={streaming}>
+          New chat
         </button>
-      </form>
-    </section>
+        <ul>
+          {conversations.map((conversation) => (
+            <li key={conversation.id}>
+              <button
+                onClick={() => void openConversation(conversation.id)}
+                disabled={streaming}
+                aria-current={conversation.id === activeId ? 'true' : undefined}
+              >
+                {conversation.title ?? conversation.preview ?? 'New conversation'}
+              </button>{' '}
+              <button
+                aria-label={`Delete conversation ${conversation.title ?? conversation.preview ?? conversation.id}`}
+                onClick={() => void removeConversation(conversation.id)}
+                disabled={streaming}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
+      <section aria-label="Chat" style={{ flex: 1 }}>
+        <ol>
+          {messages.map((message, i) => (
+            <li key={i} data-role={message.role}>
+              {message.role === 'assistant' ? (
+                // react-markdown renders to React elements — model output is
+                // never injected as raw HTML (CSP is the second net).
+                <Markdown>{message.content}</Markdown>
+              ) : (
+                <p>{message.content}</p>
+              )}
+            </li>
+          ))}
+        </ol>
+        {error && <p role="alert">{error}</p>}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <label>
+            Message{' '}
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              rows={3}
+              maxLength={8000}
+            />
+          </label>{' '}
+          <button type="submit" disabled={streaming || input.trim().length === 0}>
+            {streaming ? 'Answering…' : 'Send'}
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
