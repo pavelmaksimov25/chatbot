@@ -3,8 +3,9 @@ import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
+import { PG_POOL } from '../db/db.module';
 
-export const PG_POOL = 'PG_POOL';
+export { PG_POOL };
 export const VALKEY = 'VALKEY';
 
 @Injectable()
@@ -16,7 +17,8 @@ export class StoreHealthService implements OnModuleDestroy {
   ) {}
 
   async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled([this.pool.end(), this.valkeyClient.quit()]);
+    // The pool belongs to DbModule; only the valkey probe client is ours.
+    await this.valkeyClient.quit().catch(() => undefined);
   }
 
   postgres(): Promise<HealthIndicatorResult> {

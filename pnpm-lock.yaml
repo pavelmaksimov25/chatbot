@@ -354,6 +354,9 @@ importers:
       '@nestjs/testing':
         specifier: ^11.1.26
         version: 11.1.26(@nestjs/common@11.1.26(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.26)(@nestjs/microservices@11.1.26)(@nestjs/platform-express@11.1.26)
+      '@testcontainers/postgresql':
+        specifier: ^12.0.1
+        version: 12.0.1
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
@@ -1572,6 +1575,9 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@testcontainers/postgresql@12.0.1':
+    resolution: {integrity: sha512-6SyyduUM6lTAo4UwKG1aCochP6wTe0k7/W/m5uODZQMUrV3STk6/28Km3474JLGZdw/P793BUEF2IeU7rDyoEg==}
 
   '@testcontainers/redis@12.0.1':
     resolution: {integrity: sha512-x5iDR6Y2Mc+2rTJYSQlRTtBMCPt77pKxDogpqRwXgJVmWoDrWFpiFcA/dw6IEoNuyxYUg03tbS8/VzCJI5JX6A==}
@@ -6048,6 +6054,15 @@ snapshots:
       '@sinonjs/commons': 3.0.1
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@testcontainers/postgresql@12.0.1':
+    dependencies:
+      testcontainers: 12.0.1
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - react-native-b4a
+      - supports-color
 
   '@testcontainers/redis@12.0.1':
     dependencies:

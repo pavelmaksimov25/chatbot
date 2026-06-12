@@ -3,6 +3,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { PingModule } from './ping/ping.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { PingModule } from './ping/ping.module';
     HealthModule,
     MetricsModule,
     PingModule,
+    ProfileModule,
   ],
 })
 export class AppModule {}

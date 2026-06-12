@@ -3,9 +3,10 @@ import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
+import { VALKEY } from '../cache/cache.module';
 
 export const PG_POOL = 'PG_POOL';
-export const VALKEY = 'VALKEY';
+export { VALKEY };
 
 const PROBE_TIMEOUT_MS = 2000;
 
@@ -18,7 +19,8 @@ export class StoreHealthService implements OnModuleDestroy {
   ) {}
 
   async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled([this.pool.end(), this.valkeyClient.quit()]);
+    // The valkey client belongs to CacheModule; only the pool is ours.
+    await this.pool.end().catch(() => undefined);
   }
 
   postgres(): Promise<HealthIndicatorResult> {
