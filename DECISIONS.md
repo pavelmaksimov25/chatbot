@@ -5,6 +5,28 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 16 — BullMQ infra + async output audit
+
+- **Enqueueing is fire-and-forget BY CONTRACT.** The producer catches and
+  logs enqueue failures (plus a counter) — a Redis hiccup can never block,
+  delay, or fail a turn that already streamed. The audit is the backstop;
+  input-side context scoping stays the primary control.
+- **The v1 policy set is deliberately thin** — a full-text secret scan (no
+  window/holdback, catching anything the streaming sanitizer structurally
+  could not see) plus an `AUDIT_FLAG_PATTERNS` env denylist seam. The durable
+  value of this slice is the INFRASTRUCTURE: queue, worker, retry, flag
+  columns, failure surface. Heavier semantic checks plug into `auditText()`.
+- **Flags land on the message row** (`flagged`, `flag_reason`) + a grep-able
+  `output audit FLAGGED` warn log + `llm_audit_jobs_total{outcome}` counters.
+  Failed jobs stay in Redis (`removeOnFail: false`) — the minimal "board" —
+  with retry ×3, exponential backoff.
+- **Worker runs in the api process for now.** A separate worker deployment is
+  a scale decision, not an architecture one — the processor only touches
+  Postgres and is already isolated behind the queue. An audited message that
+  was deleted before the job ran counts as done, not failed.
+- **`BullModule.forRootAsync`** so connection env is read at bootstrap, not
+  at module-file import — keeps tests (and any future config reload) sane.
+
 ## Slice 15 — File-in-chat (inline analysis incl. vision)
 
 - **The adapter contract grew `ContentPart[]` (text | image | document)** and

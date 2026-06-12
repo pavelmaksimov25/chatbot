@@ -14,6 +14,7 @@ import { FakeLlmAdapter } from '../llm/fake.adapter';
 import { ProfileService } from '../profile/profile.service';
 import type { Profile } from '../profile/profile.service';
 import { FileService } from '../files/file.service';
+import { AuditService } from '../audit/audit.service';
 import { NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(120_000);
@@ -75,6 +76,7 @@ describe('ChatController (integration)', () => {
                 : Promise.reject(Object.assign(new Error('not found'), { code: 5 })),
           },
         },
+        { provide: AuditService, useValue: { enqueueOutputAudit: jest.fn() } },
         {
           provide: FileService,
           useValue: {
