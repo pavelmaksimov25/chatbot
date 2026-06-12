@@ -90,8 +90,9 @@ export class ApiMock {
       return json(res, 404, { message: 'conversation not found' });
     }
 
-    const convMessages =
-      /^\/conversations\/([^/]+)\/(?:messages(?:\/[^/]+\/edit)?|welcome)$/.exec(path);
+    const convMessages = /^\/conversations\/([^/]+)\/(?:messages(?:\/[^/]+\/edit)?|welcome)$/.exec(
+      path,
+    );
     if (convMessages && req.method === 'GET') {
       return json(res, 200, [
         { id: 'm1', role: 'user', content: 'hi', seq: 1 },
@@ -116,6 +117,28 @@ export class ApiMock {
         setImmediate(writeNext);
       };
       writeNext();
+      return;
+    }
+
+    if (path === '/files' && req.method === 'POST') {
+      return json(res, 201, {
+        id: 'f1',
+        name: 'notes.txt',
+        mime: 'text/plain',
+        sizeBytes: 11,
+        receivedContentType: req.headers['content-type'] ?? '',
+        forUser: req.headers['x-user-sub'] ?? '',
+      });
+    }
+    if (path === '/files' && req.method === 'GET') {
+      return json(res, 200, [{ id: 'f1', name: 'notes.txt', mime: 'text/plain', sizeBytes: 11 }]);
+    }
+    if (path === '/files/f1' && req.method === 'GET') {
+      res.writeHead(200, {
+        'content-type': 'text/plain',
+        'content-disposition': 'attachment; filename="notes.txt"',
+      });
+      res.end('hello files');
       return;
     }
 

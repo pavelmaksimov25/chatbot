@@ -405,6 +405,49 @@ describe('Auth0 BFF session (integration)', () => {
     });
   });
 
+  describe('files proxy (/files)', () => {
+    it('answers 401 without a session and 403 without CSRF', async () => {
+      await request(app.getHttpServer()).get('/files').expect(401);
+
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      await agent
+        .post('/files')
+        .attach('file', Buffer.from('x'), { filename: 'x.txt', contentType: 'text/plain' })
+        .expect(403);
+    });
+
+    it('uploads as multipart with the session sub stamped', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      const res = await agent
+        .post('/files')
+        .set('X-CSRF-Token', session.csrfToken)
+        .attach('file', Buffer.from('hello files'), {
+          filename: 'notes.txt',
+          contentType: 'text/plain',
+        })
+        .expect(201);
+      expect(res.body).toMatchObject({ id: 'f1', forUser: 'auth0|user-1' });
+      expect((res.body as { receivedContentType: string }).receivedContentType).toContain(
+        'multipart/form-data',
+      );
+    });
+
+    it('passes downloads through with headers intact', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+
+      const res = await agent
+        .get('/files/f1')
+        .expect(200)
+        .expect('content-type', /text\/plain/)
+        .expect('content-disposition', /notes\.txt/);
+      expect(res.text).toBe('hello files');
+    });
+  });
+
   describe('silent re-auth (refresh rotation)', () => {
     it('refreshes an expiring access token server-side and rotates the refresh token', async () => {
       oidc.nextExpiresIn = 1; // lands inside the refresh-ahead window immediately
