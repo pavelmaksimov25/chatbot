@@ -5,6 +5,32 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 11 — Multi-provider fallback + tier mapping
+
+- **Provider order is FIXED: Anthropic → OpenAI → Gemini** (availability-first
+  per the design doc). No health-based reordering, no cost router — uptime
+  beats cleverness in v1, and a deterministic order makes incidents legible.
+- **ANY pre-first-token failure falls through** — 429/5xx, network errors,
+  timeouts, and also 400/401: a misconfigured key is indistinguishable from an
+  unavailable provider from the user's seat. Unconfigured providers (empty
+  key) are skipped without an attempt. After the first token the stream is
+  committed — mid-stream failures propagate as the existing SSE error + retry,
+  never a provider switch (the design doc's hard line).
+- **First-token timeout 10 s** (`LLM_FIRST_TOKEN_TIMEOUT_MS`). On timeout the
+  abandoned iterator is released fire-and-forget — awaiting `return()` on a
+  hung async generator queues behind the stuck `next()` and deadlocks (found
+  by the TDD suite, kept as a regression test).
+- **Tier map (env-overridable per provider+tier):** default =
+  `claude-sonnet-4-6` / `gpt-5` / `gemini-2.5-pro`; cheap = `claude-haiku-4-5`
+  / `gpt-5-mini` / `gemini-2.5-flash`. A fallback answers on the SAME tier —
+  quality/cost jumps must be explicit, never a side effect.
+- **Live-verification boundary, honestly:** OPENAI/GEMINI keys are not
+  provisioned, so the cross-provider fallback stream was verified against
+  provider fakes only. Verified live instead: Anthropic-only turns still
+  stream through the new adapter, and with the primary key disabled the chain
+  walks to a clean 503. Streaming a real OpenAI/Gemini answer awaits keys —
+  flagged to the project owner, no workaround attempted.
+
 ## Slice 10 — Auto-welcome
 
 - **The welcome turn sends a CONSTANT, unpersisted user-role trigger** instead
