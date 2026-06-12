@@ -5,6 +5,29 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 15 — File-in-chat (inline analysis incl. vision)
+
+- **The adapter contract grew `ContentPart[]` (text | image | document)** and
+  each provider maps it to its own wire shape: Anthropic image/document
+  base64 blocks (PDFs as native document input), Gemini `inlineData` for
+  both, OpenAI `image_url` data-URLs for images. **OpenAI gets a loud
+  in-context placeholder for PDFs** instead of a portable passthrough —
+  degrading visibly in the answer beats failing the fallback turn or
+  pretending the model saw the document.
+- **Attachments are decrypted at prompt-assembly time, every turn** — the
+  envelope's "unwrap only at processing time" contract; no plaintext cache.
+  The base64 of a stored file is deterministic, so attachment parts do not
+  break the cacheable prefix.
+- **`message_files` has no FK to `files`** (cross-module DDL ordering); a
+  file deleted after being attached degrades to an explicit "[an attached
+  file is no longer available]" text part rather than failing the whole
+  conversation forever.
+- **Attachment ownership is re-checked at BOTH ends**: before the message
+  persists (a foreign file id 404s and persists nothing) and again at every
+  assembly (download is owner-scoped).
+- **Image generation stays forbidden product-wide** — nothing in this slice
+  requests or renders generated images; analysis only.
+
 ## Slice 14 — Encrypted file storage
 
 - **Vault Transit's `datakey` endpoint IS the envelope** — it generates the

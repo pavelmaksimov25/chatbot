@@ -6,6 +6,8 @@ interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Attachment count from history; names known only for local sends. */
+  attachments?: string[];
 }
 
 interface ConversationItem {
@@ -24,8 +26,11 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const [attachment, setAttachment] = useState<{ id: string; name: string } | null>(null);
+  const [attaching, setAttaching] = useState(false);
   const activeRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   const setStreamingState = useCallback((value: boolean): void => {
     streamingRef.current = value;
@@ -148,7 +153,12 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       // a stream is writing into the view (stale history must not clobber it).
       if (activeRef.current === id && !streamingRef.current) {
         setMessages(
-          history.map(({ id: messageId, role, content }) => ({ id: messageId, role, content })),
+          history.map((m: ChatMessage & { fileIds?: string[] }) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            attachments: m.fileIds?.map(() => 'attachment'),
+          })),
         );
       }
     }
@@ -209,16 +219,45 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     }
   };
 
+  const attachFile = async (file: File): Promise<void> => {
+    setAttaching(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      const res = await fetch('/files', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+        body: form,
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(body.message ?? 'the file could not be attached');
+      }
+      const uploaded = (await res.json()) as { id: string; name: string };
+      setAttachment({ id: uploaded.id, name: uploaded.name });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'the file could not be attached');
+    } finally {
+      setAttaching(false);
+      if (attachInputRef.current) {
+        attachInputRef.current.value = '';
+      }
+    }
+  };
+
   const send = async (): Promise<void> => {
     const content = input.trim();
     if (!content || streaming) {
       return;
     }
     const editTarget = editing;
+    const attached = attachment;
     setError(null);
     setStreamingState(true);
     setInput('');
     setEditing(null);
+    setAttachment(null);
     setMessages((prev) => {
       // An edit truncates the tail locally — the server soft-supersedes it.
       const base = editTarget
@@ -227,7 +266,11 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
             prev.findIndex((m) => m.id === editTarget.id),
           )
         : prev;
-      return [...base, { role: 'user', content }, { role: 'assistant', content: '' }];
+      return [
+        ...base,
+        { role: 'user', content, attachments: attached ? [attached.name] : undefined },
+        { role: 'assistant', content: '' },
+      ];
     });
 
     try {
@@ -241,7 +284,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, ...(attached && { fileIds: [attached.id] }) }),
       });
       await consumeStream(res);
       void refreshList(); // ordering + preview may have changed
@@ -291,7 +334,10 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
                 <Markdown>{message.content}</Markdown>
               ) : (
                 <p>
-                  {message.content}{' '}
+                  {message.content}
+                  {message.attachments?.map((name, j) => (
+                    <span key={j}> 📎 {name}</span>
+                  ))}{' '}
                   {message.id && (
                     <button
                       aria-label={`Edit message ${message.content.slice(0, 40)}`}
@@ -322,7 +368,30 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
               maxLength={8000}
             />
           </label>{' '}
-          <button type="submit" disabled={streaming || input.trim().length === 0}>
+          <label>
+            Attach{' '}
+            <input
+              ref={attachInputRef}
+              type="file"
+              accept=".txt,.md,.json,.pdf,image/*,text/*"
+              disabled={streaming || attaching}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  void attachFile(file);
+                }
+              }}
+            />
+          </label>{' '}
+          {attachment && (
+            <span>
+              📎 {attachment.name}{' '}
+              <button type="button" onClick={() => setAttachment(null)}>
+                Remove
+              </button>
+            </span>
+          )}{' '}
+          <button type="submit" disabled={streaming || attaching || input.trim().length === 0}>
             {streaming ? 'Answering…' : editing ? 'Save edit' : 'Send'}
           </button>
           {editing && (

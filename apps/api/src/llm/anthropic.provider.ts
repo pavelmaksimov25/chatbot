@@ -2,9 +2,33 @@ import { Injectable } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { PinoLogger } from 'nestjs-pino';
 import { Counter, register } from 'prom-client';
-import type { LlmProvider, StreamChatRequest } from './llm-adapter';
+import type { ContentPart, LlmProvider, StreamChatRequest } from './llm-adapter';
 import { ProviderLimitsRegistry, headerNumber } from './provider-limits';
 import { MAX_TOKENS, modelFor } from './tier-models';
+
+type AnthropicPart = Record<string, unknown>;
+
+function toAnthropicParts(content: string | ContentPart[]): AnthropicPart[] {
+  if (typeof content === 'string') {
+    return [{ type: 'text', text: content }];
+  }
+  return content.map((part): AnthropicPart => {
+    if (part.type === 'text') {
+      return { type: 'text', text: part.text };
+    }
+    if (part.type === 'image') {
+      return {
+        type: 'image',
+        source: { type: 'base64', media_type: part.mime, data: part.dataBase64 },
+      };
+    }
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: part.mime, data: part.dataBase64 },
+      ...(part.name && { title: part.name }),
+    };
+  });
+}
 
 function counter(name: string, help: string): Counter {
   return (
@@ -60,19 +84,21 @@ export class AnthropicProvider implements LlmProvider {
         model: modelFor('anthropic', request.tier),
         max_tokens: MAX_TOKENS(),
         system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
-        messages: request.messages.map((m, i) => ({
-          role: m.role,
-          content:
-            i === lastIndex
-              ? [
-                  {
-                    type: 'text' as const,
-                    text: m.content,
-                    cache_control: { type: 'ephemeral' as const },
-                  },
-                ]
-              : m.content,
-        })),
+        messages: request.messages.map((m, i) => {
+          // Older string-only messages stay plain strings — byte-stable
+          // prefix for the cache; multimodal and newest messages use parts.
+          if (typeof m.content === 'string' && i !== lastIndex) {
+            return { role: m.role, content: m.content };
+          }
+          const parts = toAnthropicParts(m.content);
+          if (i === lastIndex) {
+            parts[parts.length - 1] = {
+              ...parts[parts.length - 1],
+              cache_control: { type: 'ephemeral' },
+            };
+          }
+          return { role: m.role, content: parts };
+        }) as Anthropic.MessageParam[],
         stream: true,
       })
       .withResponse();

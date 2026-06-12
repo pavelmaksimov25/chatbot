@@ -30,6 +30,8 @@ export interface MessageRecord {
   seq: number;
   active: boolean;
   parentMessageId: string | null;
+  /** Attached file ids (slice 15) — empty for plain text messages. */
+  fileIds: string[];
   createdAt: Date;
 }
 
@@ -85,6 +87,13 @@ export class ConversationRepository implements OnModuleInit {
       );
       CREATE INDEX IF NOT EXISTS messages_conversation_idx
         ON messages (conversation_id, seq);
+      CREATE TABLE IF NOT EXISTS message_files (
+        message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        -- No FK to files: the files table is owned by another module whose
+        -- DDL may run later; a deleted file degrades to a placeholder part.
+        file_id    uuid NOT NULL,
+        PRIMARY KEY (message_id, file_id)
+      );
     `);
   }
 
@@ -145,12 +154,21 @@ export class ConversationRepository implements OnModuleInit {
 
   /** The active chain, oldest first — exactly what is sent to the LLM. */
   async listActiveMessages(conversationId: string): Promise<MessageRecord[]> {
-    const { rows } = await this.pool.query<MessageRow>(
-      `SELECT ${MESSAGE_COLUMNS} FROM messages
-        WHERE conversation_id = $1 AND active ORDER BY seq`,
+    const { rows } = await this.pool.query<MessageRow & { file_ids: string[] }>(
+      `SELECT m.id, m.conversation_id, m.role, m.content, m.seq, m.active,
+              m.parent_message_id, m.created_at,
+              COALESCE(
+                array_agg(mf.file_id) FILTER (WHERE mf.file_id IS NOT NULL),
+                '{}'
+              ) AS file_ids
+         FROM messages m
+         LEFT JOIN message_files mf ON mf.message_id = m.id
+        WHERE m.conversation_id = $1 AND m.active
+        GROUP BY m.id
+        ORDER BY m.seq`,
       [conversationId],
     );
-    return rows.map(toMessage);
+    return rows.map((row) => ({ ...toMessage(row), fileIds: row.file_ids }));
   }
 
   /**
@@ -162,6 +180,7 @@ export class ConversationRepository implements OnModuleInit {
     role: MessageRole,
     content: string,
     parentMessageId: string | null = null,
+    fileIds: string[] = [],
   ): Promise<MessageRecord> {
     return this.inTransaction(async (tx) => {
       await tx.query('SELECT 1 FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
@@ -171,8 +190,14 @@ export class ConversationRepository implements OnModuleInit {
          RETURNING ${MESSAGE_COLUMNS}`,
         [conversationId, role, content, parentMessageId],
       );
+      for (const fileId of fileIds) {
+        await tx.query('INSERT INTO message_files (message_id, file_id) VALUES ($1, $2)', [
+          rows[0].id,
+          fileId,
+        ]);
+      }
       await tx.query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
-      return toMessage(rows[0]);
+      return { ...toMessage(rows[0]), fileIds };
     });
   }
 
@@ -249,6 +274,7 @@ function toMessage(row: MessageRow): MessageRecord {
     seq: row.seq,
     active: row.active,
     parentMessageId: row.parent_message_id,
+    fileIds: [],
     createdAt: row.created_at,
   };
 }

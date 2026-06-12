@@ -1,6 +1,13 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { FileService } from '../files/file.service';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
-import type { ChatTurnMessage, LlmAdapter } from '../llm/llm-adapter';
+import type { ChatTurnMessage, ContentPart, LlmAdapter } from '../llm/llm-adapter';
 import { ProfileService } from '../profile/profile.service';
 import type { Profile } from '../profile/profile.service';
 import { ConversationRepository } from './conversation.repository';
@@ -40,6 +47,7 @@ export class ChatService {
     @Inject(LLM_ADAPTER) private readonly llm: LlmAdapter,
     private readonly conversations: ConversationRepository,
     private readonly profiles: ProfileService,
+    private readonly files: FileService,
   ) {}
 
   createConversation(userSub: string): Promise<Conversation> {
@@ -71,9 +79,16 @@ export class ChatService {
     userSub: string,
     conversationId: string,
     rawContent: unknown,
+    rawFileIds: unknown = [],
   ): AsyncGenerator<ChatStreamEvent> {
     const content = checkInput(rawContent);
+    const fileIds = checkFileIds(rawFileIds);
     await this.requireConversation(userSub, conversationId);
+    // Attachment ownership is verified BEFORE the message persists — a
+    // foreign or unknown file id is indistinguishable from "not found".
+    for (const fileId of fileIds) {
+      await this.files.getMeta(userSub, fileId);
+    }
 
     const history = await this.conversations.listActiveMessages(conversationId);
     const userMessage = await this.conversations.appendMessage(
@@ -81,6 +96,7 @@ export class ChatService {
       'user',
       content,
       history.at(-1)?.id ?? null,
+      fileIds,
     );
     yield* this.streamAnswer(conversationId, userMessage.id, userSub);
   }
@@ -126,9 +142,13 @@ export class ChatService {
     userMessageId: string | null,
     userSub: string,
   ): AsyncGenerator<ChatStreamEvent> {
-    const chain: ChatTurnMessage[] = (
-      await this.conversations.listActiveMessages(conversationId)
-    ).map((m) => ({ role: m.role, content: m.content }));
+    const records = await this.conversations.listActiveMessages(conversationId);
+    const chain: ChatTurnMessage[] = await Promise.all(
+      records.map(async (m) => ({
+        role: m.role,
+        content: m.fileIds.length === 0 ? m.content : await this.withAttachments(userSub, m),
+      })),
+    );
     // Welcomed conversations have an assistant-first chain; the provider
     // requires user-first. The constant trigger restores alternation and,
     // being deterministic, stays inside the cacheable prefix.
@@ -174,6 +194,44 @@ export class ChatService {
     }
   }
 
+  /**
+   * Decrypts attachments at processing time only (the envelope's contract)
+   * and renders them as provider-agnostic parts: documents as document
+   * input, images as vision input, text inline. Deterministic per file, so
+   * the cacheable prefix stays byte-stable across turns.
+   */
+  private async withAttachments(
+    userSub: string,
+    message: { content: string; fileIds: string[] },
+  ): Promise<ContentPart[]> {
+    const parts: ContentPart[] = [];
+    for (const fileId of message.fileIds) {
+      try {
+        const { meta, content } = await this.files.download(userSub, fileId);
+        if (meta.mime.startsWith('image/')) {
+          parts.push({ type: 'image', mime: meta.mime, dataBase64: content.toString('base64') });
+        } else if (meta.mime === 'application/pdf') {
+          parts.push({
+            type: 'document',
+            mime: meta.mime,
+            dataBase64: content.toString('base64'),
+            name: meta.name,
+          });
+        } else {
+          parts.push({
+            type: 'text',
+            text: `Contents of the attached file "${meta.name}":\n${content.toString('utf8')}`,
+          });
+        }
+      } catch {
+        // The file was deleted after being attached — degrade in-context.
+        parts.push({ type: 'text', text: '[an attached file is no longer available]' });
+      }
+    }
+    parts.push({ type: 'text', text: message.content });
+    return parts;
+  }
+
   /** Cache-first profile read; a missing profile degrades to the generic prompt. */
   private async profileOrNull(userSub: string): Promise<Profile | null> {
     try {
@@ -182,6 +240,20 @@ export class ChatService {
       return null;
     }
   }
+}
+
+function checkFileIds(raw: unknown): string[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (
+    !Array.isArray(raw) ||
+    raw.some((id) => typeof id !== 'string' || id.length === 0) ||
+    raw.length > 4
+  ) {
+    throw new BadRequestException('fileIds must be up to 4 file id strings');
+  }
+  return raw as string[];
 }
 
 /**
