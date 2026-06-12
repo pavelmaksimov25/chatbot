@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Strict CSP: no inline/eval scripts, no foreign origins. ws: is the
+         Vite dev HMR socket; 'unsafe-inline' styles are needed by Vite dev
+         style injection. Model output is never rendered as raw HTML. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: https://localhost:8443; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+    />
     <title>Chatbot</title>
   </head>
   <body>

@@ -32,6 +32,9 @@ services:
       passwordKey: API_DB_PASSWORD
     env:
       USER_SERVICE_GRPC_URL: '{{ .Release.Name }}-user-service:50051'
+      LLM_MODEL: claude-sonnet-4-6
+    secretEnv:
+      ANTHROPIC_API_KEY: { secret: chatbot-llm, key: ANTHROPIC_API_KEY }
   user-service:
     port: 3002
     grpcPort: 50051

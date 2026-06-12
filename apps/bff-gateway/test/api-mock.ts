@@ -25,6 +25,12 @@ export interface RecordedCall {
 export class ApiMock {
   readonly calls: RecordedCall[] = [];
   readonly profiles = new Map<string, StoredProfile>();
+  /** SSE frames replayed by POST /conversations/:id/messages, one write each. */
+  sseFrames: string[] = [
+    'event: chunk\ndata: {"text":"Hello"}\n\n',
+    'event: chunk\ndata: {"text":" world"}\n\n',
+    'event: done\ndata: {"conversationId":"conv-1"}\n\n',
+  ];
 
   private server!: Server;
 
@@ -61,6 +67,38 @@ export class ApiMock {
       };
       this.profiles.set(sub, profile);
       return json(res, 200, profile);
+    }
+
+    if (req.method === 'POST' && path === '/conversations') {
+      return json(res, 201, { id: 'conv-1', userSub: req.headers['x-user-sub'], title: null });
+    }
+
+    const convMessages = /^\/conversations\/([^/]+)\/messages$/.exec(path);
+    if (convMessages && req.method === 'GET') {
+      return json(res, 200, [
+        { id: 'm1', role: 'user', content: 'hi', seq: 1 },
+        { id: 'm2', role: 'assistant', content: 'Hello world', seq: 2 },
+      ]);
+    }
+    if (convMessages && req.method === 'POST') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+      });
+      // One write per frame across event-loop turns — a buffering proxy
+      // would coalesce these; the spec asserts the full relayed payload.
+      const frames = [...this.sseFrames];
+      const writeNext = (): void => {
+        const frame = frames.shift();
+        if (frame === undefined) {
+          res.end();
+          return;
+        }
+        res.write(frame);
+        setImmediate(writeNext);
+      };
+      writeNext();
+      return;
     }
 
     const subMatch = /^\/profiles\/([^/]+)$/.exec(path);

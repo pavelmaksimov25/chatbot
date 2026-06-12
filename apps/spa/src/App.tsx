@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Chat } from './Chat';
 
 interface Me {
   sub: string;
@@ -117,7 +118,7 @@ function SignedIn({ me }: { me: Me }) {
     <main>
       <h1>Chatbot</h1>
       <p>Signed in as {profile?.displayName ?? me.name ?? me.email}</p>
-      <p>Chat lands here in the next slice.</p>
+      <Chat csrfToken={me.csrfToken} />
       {profile && (
         <section aria-label="Profile">
           <label>

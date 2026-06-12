@@ -1,27 +1,22 @@
-import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { VALKEY } from '../cache/cache.module';
+import { PG_POOL } from '../db/db.module';
 
-export const PG_POOL = 'PG_POOL';
-export { VALKEY };
+export { PG_POOL, VALKEY };
 
 const PROBE_TIMEOUT_MS = 2000;
 
 @Injectable()
-export class StoreHealthService implements OnModuleDestroy {
+export class StoreHealthService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(VALKEY) private readonly valkeyClient: Redis,
     private readonly indicator: HealthIndicatorService,
   ) {}
-
-  async onModuleDestroy(): Promise<void> {
-    // The valkey client belongs to CacheModule; only the pool is ours.
-    await this.pool.end().catch(() => undefined);
-  }
 
   postgres(): Promise<HealthIndicatorResult> {
     return this.probe('postgres', async () => {
