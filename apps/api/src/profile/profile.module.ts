@@ -8,5 +8,6 @@ import { ProfileService } from './profile.service';
   imports: [CacheModule, UserServiceClientModule],
   controllers: [ProfileController],
   providers: [ProfileService],
+  exports: [ProfileService],
 })
 export class ProfileModule {}

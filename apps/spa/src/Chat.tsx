@@ -25,6 +25,12 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const activeRef = useRef<string | null>(null);
+  const streamingRef = useRef(false);
+
+  const setStreamingState = useCallback((value: boolean): void => {
+    streamingRef.current = value;
+    setStreaming(value);
+  }, []);
 
   const refreshList = useCallback(async (): Promise<ConversationItem[]> => {
     const res = await fetch('/conversations').catch(() => null);
@@ -36,142 +42,28 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     return list;
   }, []);
 
-  const openConversation = useCallback(async (id: string): Promise<void> => {
-    activeRef.current = id;
-    setActiveId(id);
-    localStorage.setItem(CONVERSATION_KEY, id);
-    setError(null);
-    const res = await fetch(`/conversations/${encodeURIComponent(id)}/messages`).catch(() => null);
-    if (res?.status === 404) {
-      // Deleted elsewhere; fall back to a fresh chat.
-      startNewChat();
-      return;
-    }
-    if (res?.ok) {
-      const history = (await res.json()) as ChatMessage[];
-      // Ignore the response if the user switched again while it loaded.
-      if (activeRef.current === id) {
-        setMessages(
-          history.map(({ id: messageId, role, content }) => ({ id: messageId, role, content })),
-        );
-      }
-    }
+  const appendToAnswer = useCallback((text: string): void => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      next[next.length - 1] = { ...last, content: last.content + text };
+      return next;
+    });
   }, []);
 
-  const startNewChat = (): void => {
-    activeRef.current = null;
-    setActiveId(null);
-    setMessages([]);
-    setError(null);
-    setEditing(null);
-    setInput('');
-    localStorage.removeItem(CONVERSATION_KEY);
-  };
+  const dropEmptyAnswer = useCallback((): void => {
+    setMessages((prev) =>
+      prev.at(-1)?.role === 'assistant' && prev.at(-1)?.content === '' ? prev.slice(0, -1) : prev,
+    );
+  }, []);
 
-  const startEditing = (message: ChatMessage): void => {
-    if (!message.id || streaming) {
-      return;
-    }
-    setEditing({ id: message.id });
-    setInput(message.content);
-  };
-
-  const cancelEditing = (): void => {
-    setEditing(null);
-    setInput('');
-  };
-
-  // A reload resumes the last open conversation (a non-secret UUID).
-  useEffect(() => {
-    void refreshList().then((list) => {
-      const stored = localStorage.getItem(CONVERSATION_KEY);
-      if (stored && list.some((c) => c.id === stored)) {
-        void openConversation(stored);
-      } else if (stored && stored !== activeRef.current) {
-        // Stale id from a conversation deleted elsewhere — but never clear an
-        // id a concurrent send just created (the list fetch predates it).
-        localStorage.removeItem(CONVERSATION_KEY);
-      }
-    });
-  }, [refreshList, openConversation]);
-
-  const removeConversation = async (id: string): Promise<void> => {
-    const res = await fetch(`/conversations/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: { 'X-CSRF-Token': csrfToken },
-    }).catch(() => null);
-    if (res?.status !== 204) {
-      setError('the conversation could not be deleted');
-      return;
-    }
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (activeRef.current === id) {
-      startNewChat();
-    }
-  };
-
-  const send = async (): Promise<void> => {
-    const content = input.trim();
-    if (!content || streaming) {
-      return;
-    }
-    const editTarget = editing;
-    setError(null);
-    setStreaming(true);
-    setInput('');
-    setEditing(null);
-    setMessages((prev) => {
-      // An edit truncates the tail locally — the server soft-supersedes it.
-      const base = editTarget
-        ? prev.slice(
-            0,
-            prev.findIndex((m) => m.id === editTarget.id),
-          )
-        : prev;
-      return [...base, { role: 'user', content }, { role: 'assistant', content: '' }];
-    });
-
-    const appendToAnswer = (text: string): void =>
-      setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        next[next.length - 1] = { ...last, content: last.content + text };
-        return next;
-      });
-    const dropEmptyAnswer = (): void =>
-      setMessages((prev) =>
-        prev.at(-1)?.role === 'assistant' && prev.at(-1)?.content === '' ? prev.slice(0, -1) : prev,
-      );
-
-    try {
-      if (!activeRef.current) {
-        const created = await fetch('/conversations', {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': csrfToken },
-        });
-        if (!created.ok) {
-          throw new Error('could not start a conversation');
-        }
-        const id = ((await created.json()) as { id: string }).id;
-        activeRef.current = id;
-        setActiveId(id);
-        localStorage.setItem(CONVERSATION_KEY, id);
-      }
-
-      const conversation = encodeURIComponent(activeRef.current);
-      const url = editTarget
-        ? `/conversations/${conversation}/messages/${encodeURIComponent(editTarget.id)}/edit`
-        : `/conversations/${conversation}/messages`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ content }),
-      });
+  /** Reads an SSE answer stream into the trailing assistant message. */
+  const consumeStream = useCallback(
+    async (res: Response): Promise<void> => {
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(body.message ?? 'the message could not be sent');
       }
-
       for await (const { event, data } of readSse(res.body)) {
         if (event === 'chunk' && typeof data.text === 'string') {
           appendToAnswer(data.text);
@@ -195,19 +87,176 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
           throw new Error(typeof data.message === 'string' ? data.message : 'stream failed');
         }
       }
+    },
+    [appendToAnswer],
+  );
+
+  const createConversation = useCallback(async (): Promise<string> => {
+    const created = await fetch('/conversations', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+    if (!created.ok) {
+      throw new Error('could not start a conversation');
+    }
+    const id = ((await created.json()) as { id: string }).id;
+    activeRef.current = id;
+    setActiveId(id);
+    localStorage.setItem(CONVERSATION_KEY, id);
+    return id;
+  }, [csrfToken]);
+
+  /** New chat = fresh conversation greeted by the assistant before any input. */
+  const startWelcomeChat = useCallback(async (): Promise<void> => {
+    activeRef.current = null;
+    setActiveId(null);
+    setEditing(null);
+    setInput('');
+    setError(null);
+    setStreamingState(true);
+    setMessages([{ role: 'assistant', content: '' }]);
+    try {
+      const id = await createConversation();
+      const res = await fetch(`/conversations/${encodeURIComponent(id)}/welcome`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken },
+      });
+      await consumeStream(res);
+      void refreshList();
+    } catch (err) {
+      dropEmptyAnswer();
+      setError(err instanceof Error ? err.message : 'something went wrong');
+    } finally {
+      setStreamingState(false);
+    }
+  }, [createConversation, consumeStream, csrfToken, dropEmptyAnswer, refreshList]);
+
+  const openConversation = useCallback(async (id: string): Promise<void> => {
+    activeRef.current = id;
+    setActiveId(id);
+    localStorage.setItem(CONVERSATION_KEY, id);
+    setError(null);
+    const res = await fetch(`/conversations/${encodeURIComponent(id)}/messages`).catch(() => null);
+    if (res?.status === 404) {
+      // Deleted elsewhere; fall back to a blank state.
+      clearView();
+      return;
+    }
+    if (res?.ok) {
+      const history = (await res.json()) as ChatMessage[];
+      // Ignore the response if the user switched again while it loaded or
+      // a stream is writing into the view (stale history must not clobber it).
+      if (activeRef.current === id && !streamingRef.current) {
+        setMessages(
+          history.map(({ id: messageId, role, content }) => ({ id: messageId, role, content })),
+        );
+      }
+    }
+  }, []);
+
+  const clearView = (): void => {
+    activeRef.current = null;
+    setActiveId(null);
+    setMessages([]);
+    setError(null);
+    setEditing(null);
+    setInput('');
+    localStorage.removeItem(CONVERSATION_KEY);
+  };
+
+  const startEditing = (message: ChatMessage): void => {
+    if (!message.id || streaming) {
+      return;
+    }
+    setEditing({ id: message.id });
+    setInput(message.content);
+  };
+
+  const cancelEditing = (): void => {
+    setEditing(null);
+    setInput('');
+  };
+
+  // A reload resumes the last open conversation; a first visit with no
+  // history starts a welcomed conversation straight away.
+  useEffect(() => {
+    void refreshList().then((list) => {
+      const stored = localStorage.getItem(CONVERSATION_KEY);
+      if (stored && list.some((c) => c.id === stored)) {
+        void openConversation(stored);
+      } else if (stored && stored !== activeRef.current) {
+        // Stale id from a conversation deleted elsewhere — but never clear an
+        // id a concurrent send just created (the list fetch predates it).
+        localStorage.removeItem(CONVERSATION_KEY);
+      } else if (!stored && list.length === 0) {
+        void startWelcomeChat();
+      }
+    });
+  }, [refreshList, openConversation, startWelcomeChat]);
+
+  const removeConversation = async (id: string): Promise<void> => {
+    const res = await fetch(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken },
+    }).catch(() => null);
+    if (res?.status !== 204) {
+      setError('the conversation could not be deleted');
+      return;
+    }
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeRef.current === id) {
+      clearView();
+    }
+  };
+
+  const send = async (): Promise<void> => {
+    const content = input.trim();
+    if (!content || streaming) {
+      return;
+    }
+    const editTarget = editing;
+    setError(null);
+    setStreamingState(true);
+    setInput('');
+    setEditing(null);
+    setMessages((prev) => {
+      // An edit truncates the tail locally — the server soft-supersedes it.
+      const base = editTarget
+        ? prev.slice(
+            0,
+            prev.findIndex((m) => m.id === editTarget.id),
+          )
+        : prev;
+      return [...base, { role: 'user', content }, { role: 'assistant', content: '' }];
+    });
+
+    try {
+      if (!activeRef.current) {
+        await createConversation();
+      }
+      const conversation = encodeURIComponent(activeRef.current!);
+      const url = editTarget
+        ? `/conversations/${conversation}/messages/${encodeURIComponent(editTarget.id)}/edit`
+        : `/conversations/${conversation}/messages`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ content }),
+      });
+      await consumeStream(res);
       void refreshList(); // ordering + preview may have changed
     } catch (err) {
       dropEmptyAnswer();
       setError(err instanceof Error ? err.message : 'something went wrong');
     } finally {
-      setStreaming(false);
+      setStreamingState(false);
     }
   };
 
   return (
     <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start' }}>
       <nav aria-label="Conversations">
-        <button onClick={startNewChat} disabled={streaming}>
+        <button onClick={() => void startWelcomeChat()} disabled={streaming}>
           New chat
         </button>
         <ul>

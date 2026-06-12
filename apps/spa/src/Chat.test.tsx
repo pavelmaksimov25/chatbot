@@ -26,12 +26,18 @@ function sseResponse(frames: string[]): Response {
 
 interface StubOptions {
   frames?: string[];
+  welcomeFrames?: string[];
   list?: { id: string; title: string | null; preview: string | null }[];
   history?: Record<string, { id?: string; role: string; content: string }[]>;
 }
 
 function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
-  const { frames = [], list = [], history = {} } = options;
+  const {
+    frames = [],
+    welcomeFrames = ['event: done\ndata: {"assistantMessageId":"w1"}\n\n'],
+    list = [],
+    history = {},
+  } = options;
   const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -43,6 +49,9 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
     }
     if (method === 'DELETE') {
       return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (/^\/conversations\/[^/]+\/welcome$/.test(url) && method === 'POST') {
+      return Promise.resolve(sseResponse(welcomeFrames));
     }
     const messages = /^\/conversations\/([^/]+)\/messages(?:\/[^/]+\/edit)?$/.exec(url);
     if (messages && method === 'POST') {
@@ -57,6 +66,16 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
   return mock;
 }
 
+/** Mount in a resumed conversation so the auto-welcome path stays quiet. */
+function resumedStub(options: StubOptions = {}): ReturnType<typeof vi.fn> {
+  localStorage.setItem('conversationId', 'conv-1');
+  return stubChatFetch({
+    list: [{ id: 'conv-1', title: null, preview: 'resumed' }],
+    history: { 'conv-1': [] },
+    ...options,
+  });
+}
+
 async function sendMessage(text: string): Promise<void> {
   fireEvent.change(screen.getByLabelText(/Message/), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -65,7 +84,7 @@ async function sendMessage(text: string): Promise<void> {
 
 describe('Chat', () => {
   it('sends a message and renders the streamed answer as markdown', async () => {
-    const mock = stubChatFetch({
+    const mock = resumedStub({
       frames: [
         'event: chunk\ndata: {"text":"Here is **bold"}\n\n',
         'event: chunk\ndata: {"text":"** text"}\n\n',
@@ -88,7 +107,7 @@ describe('Chat', () => {
   });
 
   it('never renders model output as raw HTML', async () => {
-    stubChatFetch({
+    resumedStub({
       frames: [
         'event: chunk\ndata: {"text":"<img src=x onerror=alert(1)> stays text"}\n\n',
         'event: done\ndata: {}\n\n',
@@ -103,7 +122,7 @@ describe('Chat', () => {
   });
 
   it('surfaces a mid-stream error without losing the conversation', async () => {
-    stubChatFetch({
+    resumedStub({
       frames: [
         'event: chunk\ndata: {"text":"partial"}\n\n',
         'event: error\ndata: {"message":"the answer was interrupted, try again"}\n\n',
@@ -115,6 +134,39 @@ describe('Chat', () => {
 
     expect(await screen.findByRole('alert')).toBeDefined();
     expect(screen.getByText('doomed')).toBeDefined(); // user message kept
+  });
+
+  it('greets a first-time visitor before any input', async () => {
+    stubChatFetch({
+      list: [],
+      welcomeFrames: [
+        'event: chunk\ndata: {"text":"Hi Alice, welcome!"}\n\n',
+        'event: done\ndata: {"assistantMessageId":"w1"}\n\n',
+      ],
+    });
+    render(<Chat csrfToken="token" />);
+
+    expect(await screen.findByText('Hi Alice, welcome!')).toBeDefined();
+    expect(localStorage.getItem('conversationId')).toBe('conv-1');
+  });
+
+  it('streams a fresh greeting when New chat is clicked', async () => {
+    const mock = resumedStub({
+      history: { 'conv-1': [{ id: 'm1', role: 'user', content: 'old message' }] },
+      welcomeFrames: [
+        'event: chunk\ndata: {"text":"A fresh start!"}\n\n',
+        'event: done\ndata: {"assistantMessageId":"w2"}\n\n',
+      ],
+    });
+    render(<Chat csrfToken="token" />);
+    await screen.findByText('old message');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+
+    expect(await screen.findByText('A fresh start!')).toBeDefined();
+    expect(screen.queryByText('old message')).toBeNull();
+    const welcome = mock.mock.calls.find(([url]) => String(url).endsWith('/welcome'));
+    expect(welcome![1]?.headers).toMatchObject({ 'X-CSRF-Token': 'token' });
   });
 
   it('lists conversations in the sidebar and opens one on click', async () => {
@@ -140,9 +192,7 @@ describe('Chat', () => {
   });
 
   it('resumes the stored conversation on mount when it still exists', async () => {
-    localStorage.setItem('conversationId', 'conv-1');
-    stubChatFetch({
-      list: [{ id: 'conv-1', title: null, preview: 'resumed' }],
+    resumedStub({
       history: { 'conv-1': [{ role: 'assistant', content: 'welcome back' }] },
     });
     render(<Chat csrfToken="token" />);
@@ -151,8 +201,7 @@ describe('Chat', () => {
   });
 
   it('deletes a conversation with the CSRF token and clears the view', async () => {
-    localStorage.setItem('conversationId', 'conv-1');
-    const mock = stubChatFetch({
+    const mock = resumedStub({
       list: [{ id: 'conv-1', title: null, preview: 'doomed convo' }],
       history: { 'conv-1': [{ role: 'assistant', content: 'soon gone' }] },
     });
@@ -170,13 +219,11 @@ describe('Chat', () => {
   });
 
   it('edits a user message: truncates the tail and streams the new answer', async () => {
-    localStorage.setItem('conversationId', 'conv-1');
-    const mock = stubChatFetch({
+    const mock = resumedStub({
       frames: [
         'event: chunk\ndata: {"text":"regenerated answer"}\n\n',
         'event: done\ndata: {"userMessageId":"u1b","assistantMessageId":"a1b"}\n\n',
       ],
-      list: [{ id: 'conv-1', title: null, preview: 'editable' }],
       history: {
         'conv-1': [
           { id: 'u1', role: 'user', content: 'original question' },
@@ -207,20 +254,5 @@ describe('Chat', () => {
     const edit = mock.mock.calls.find(([url]) => String(url).includes('/edit'));
     expect(String(edit![0])).toBe('/conversations/conv-1/messages/u1/edit');
     expect(edit![1]?.headers).toMatchObject({ 'X-CSRF-Token': 'token' });
-  });
-
-  it('starts a fresh chat via New chat', async () => {
-    localStorage.setItem('conversationId', 'conv-1');
-    stubChatFetch({
-      list: [{ id: 'conv-1', title: null, preview: 'old one' }],
-      history: { 'conv-1': [{ role: 'assistant', content: 'old message' }] },
-    });
-    render(<Chat csrfToken="token" />);
-    await screen.findByText('old message');
-
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-
-    expect(screen.queryByText('old message')).toBeNull();
-    expect(localStorage.getItem('conversationId')).toBeNull();
   });
 });

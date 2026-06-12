@@ -5,6 +5,30 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 10 — Auto-welcome
+
+- **The welcome turn sends a CONSTANT, unpersisted user-role trigger** instead
+  of an empty messages array. Anthropic requires the first message to be
+  user-role, and a welcomed conversation's persisted chain starts with the
+  assistant greeting — so chain assembly prepends the trigger whenever the
+  chain is empty or assistant-first. Being a fixed string right after the
+  system block, it _extends_ the stable cacheable prefix rather than breaking
+  it. Rejected: persisting the trigger (it would show in the UI or, flagged
+  inactive, vanish from context) and dropping the greeting from later context
+  (the model would not know what it already said).
+- **The profile block enters the system prompt for ALL turns now**, not just
+  the welcome — `SYSTEM_PROMPT + name + preferences`, deterministic by
+  construction (no timestamps, no request data; jsonb key order is normalized
+  by Postgres). It changes only when the profile changes, which is exactly
+  when the prompt cache SHOULD invalidate. A missing profile degrades to the
+  generic prompt instead of failing the turn.
+- **Welcome is only valid on an empty conversation (409 otherwise)** — it is
+  a UI entry point, not a general "make the assistant speak" primitive.
+- **The SPA auto-welcomes on first visit (no conversations) and on every
+  New-chat click.** Repeatedly clicking New chat does create multiple
+  greeted conversations — visible in the sidebar and deletable; acceptable
+  for v1 over the complexity of reusing an existing empty conversation.
+
 ## Slice 9 — Edit-and-regenerate
 
 - **The edited message is a NEW row appended with the next seq, not an
