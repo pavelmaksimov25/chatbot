@@ -2,6 +2,7 @@ import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { PinoLogger } from 'nestjs-pino';
 import { LLM_PROVIDERS } from './llm-adapter';
 import type { LlmAdapter, LlmProvider, StreamChatRequest } from './llm-adapter';
+import { ProviderLimitsRegistry } from './provider-limits';
 
 /** How long a provider may take to its first token before we move on. */
 const FIRST_TOKEN_TIMEOUT_MS = (): number =>
@@ -19,6 +20,7 @@ export class FallbackLlmAdapter implements LlmAdapter {
   constructor(
     @Inject(LLM_PROVIDERS) private readonly providers: LlmProvider[],
     private readonly logger: PinoLogger,
+    private readonly limits: ProviderLimitsRegistry,
   ) {
     this.logger.setContext(FallbackLlmAdapter.name);
   }
@@ -28,6 +30,10 @@ export class FallbackLlmAdapter implements LlmAdapter {
 
     for (const provider of this.providers) {
       if (!provider.isConfigured()) {
+        continue;
+      }
+      if (!this.limits.mayAttempt(provider.name)) {
+        failures.push(`${provider.name}: circuit open`);
         continue;
       }
 
