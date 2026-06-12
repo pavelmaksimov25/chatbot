@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { FileService } from '../files/file.service';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import type { ChatTurnMessage, ContentPart, LlmAdapter } from '../llm/llm-adapter';
@@ -48,6 +49,7 @@ export class ChatService {
     private readonly conversations: ConversationRepository,
     private readonly profiles: ProfileService,
     private readonly files: FileService,
+    private readonly audit: AuditService,
   ) {}
 
   createConversation(userSub: string): Promise<Conversation> {
@@ -178,6 +180,13 @@ export class ChatService {
       assistantText,
       userMessageId,
     );
+    // Async tail: holistic audit AFTER the stream — fire-and-forget, never
+    // in the hot path.
+    this.audit.enqueueOutputAudit({
+      conversationId,
+      messageId: assistantMessage.id,
+      userSub,
+    });
     yield {
       type: 'done',
       conversationId,

@@ -87,6 +87,8 @@ export class ConversationRepository implements OnModuleInit {
       );
       CREATE INDEX IF NOT EXISTS messages_conversation_idx
         ON messages (conversation_id, seq);
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS flagged boolean NOT NULL DEFAULT false;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS flag_reason text;
       CREATE TABLE IF NOT EXISTS message_files (
         message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         -- No FK to files: the files table is owned by another module whose
