@@ -5,24 +5,48 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 9 — Edit-and-regenerate
+
+- **The edited message is a NEW row appended with the next seq, not an
+  in-place update of the original.** The original (and everything after it)
+  flips `active = false` in the same transaction; the new row's
+  `parent_message_id` points at the original — that is the version link the
+  design doc reserved. Rejected: updating the row in place (destroys the
+  audit trail and the v2 branching seam) and reusing the original's seq
+  (violates the uniqueness constraint while the superseded row is kept).
+- **Only active USER messages are editable**, and the target's existence is
+  checked inside the same locked transaction that supersedes the tail — a
+  double-edit of the same original (or a concurrent edit race) loses cleanly
+  with a 404 instead of corrupting the chain.
+- **The edit endpoint returns the same SSE wire as a normal send**
+  (`POST …/messages/:messageId/edit`), so the BFF pipe, the SPA stream
+  parser, and the failure semantics are identical — one streaming code path,
+  not two.
+- **The SPA adopts persisted message ids from the `done` event** instead of
+  re-fetching the history after each turn. A refetch would be simpler but
+  would replace the just-streamed view (visible flicker) for data we already
+  have; ids are needed so the new turn is immediately editable.
+
 ## Slice 8 — Conversation history
 
 - **Deleting a conversation is a hard `DELETE` (messages go via FK cascade),
   not a soft delete.** The issue says "conversation + messages removed", and
   user-initiated deletion of their own data should actually delete it. Soft
-  flags in this codebase (`messages.active`) exist for *edit supersession*
+  flags in this codebase (`messages.active`) exist for _edit supersession_
   semantics, not deletion — conflating the two would make "delete my data"
   a lie.
 - **The sidebar label is `title ?? preview`**, where `preview` is the first
   80 chars of the first active user message, computed in the list query.
   Generated titles are slice 17; shipping a list of "Untitled" rows until
   then is needless UX damage for one subquery.
-- **List ordering is `updated_at DESC`** (most recently *touched*, not most
+- **List ordering is `updated_at DESC`** (most recently _touched_, not most
   recently created) — matches every mainstream chat product; `updated_at` is
   already bumped on each append from slice 7.
 - **The SPA refreshes the sidebar after each completed turn** instead of
   optimistically reordering — one cheap GET against a BFF-local route, zero
   client-side ordering logic to get wrong.
+
+## Slice 7 — Streaming chat turn
 
 - **Model `claude-sonnet-4-6`, thinking off, `max_tokens` 1024 (env-overridable
   `LLM_MODEL` / `LLM_MAX_TOKENS`).** The roadmap pins Sonnet for chat (fast
@@ -40,7 +64,7 @@ rejected — so any of it can be revisited with context instead of archaeology.
   stay a dumb pipe.
 - **Persistence is synchronous in the request, not BullMQ.** The roadmap puts
   queue infra in slice 16; persisting inline costs two inserts per turn. The
-  user message is inserted *before* the LLM call (input is never lost); the
+  user message is inserted _before_ the LLM call (input is never lost); the
   assistant message is inserted only after the stream completes successfully.
   A mid-stream failure therefore persists no half-answer — the client gets an
   `error` event and the user retries from the intact user message. Rejected:
@@ -69,7 +93,7 @@ rejected — so any of it can be revisited with context instead of archaeology.
   assistant…"). The cached stable prefix + per-user welcome content is slice
   10/13 territory; what matters now is that it already sits at the front of
   the request, where the cacheable prefix will live.
-- **Failure boundary = the first *released* chunk.** A provider failure before
+- **Failure boundary = the first _released_ chunk.** A provider failure before
   the sanitizer has released anything is a plain HTTP 502/4xx (the client
   shows a normal error state); after streaming has started it becomes an SSE
   `error` event on the open stream. Note the sanitizer's 64-char holdback

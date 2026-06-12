@@ -2,11 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import type { ChatTurnMessage, LlmAdapter } from '../llm/llm-adapter';
 import { ConversationRepository } from './conversation.repository';
-import type {
-  Conversation,
-  ConversationListItem,
-  MessageRecord,
-} from './conversation.repository';
+import type { Conversation, ConversationListItem, MessageRecord } from './conversation.repository';
 import { checkInput } from './input-safety';
 import { StreamSanitizer } from './stream-sanitizer';
 
@@ -72,11 +68,38 @@ export class ChatService {
       content,
       history.at(-1)?.id ?? null,
     );
+    yield* this.streamAnswer(conversationId, userMessage.id);
+  }
 
-    const chain: ChatTurnMessage[] = [...history, userMessage].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+  /**
+   * Edit-and-regenerate: the tail from the edited message onward is
+   * soft-superseded, the edited content becomes the new chain head, and the
+   * assistant re-answers. Superseded rows never reach the LLM.
+   */
+  async *streamEdit(
+    userSub: string,
+    conversationId: string,
+    messageId: string,
+    rawContent: unknown,
+  ): AsyncGenerator<ChatStreamEvent> {
+    const content = checkInput(rawContent);
+    await this.requireConversation(userSub, conversationId);
+
+    const edited = await this.conversations.supersedeAndReplace(conversationId, messageId, content);
+    if (!edited) {
+      throw new NotFoundException('message not found or not editable');
+    }
+    yield* this.streamAnswer(conversationId, edited.id);
+  }
+
+  /** The shared back half of a turn: assemble → stream sanitized → persist. */
+  private async *streamAnswer(
+    conversationId: string,
+    userMessageId: string,
+  ): AsyncGenerator<ChatStreamEvent> {
+    const chain: ChatTurnMessage[] = (
+      await this.conversations.listActiveMessages(conversationId)
+    ).map((m) => ({ role: m.role, content: m.content }));
 
     const sanitizer = new StreamSanitizer();
     let assistantText = '';
@@ -97,12 +120,12 @@ export class ChatService {
       conversationId,
       'assistant',
       assistantText,
-      userMessage.id,
+      userMessageId,
     );
     yield {
       type: 'done',
       conversationId,
-      userMessageId: userMessage.id,
+      userMessageId,
       assistantMessageId: assistantMessage.id,
     };
   }

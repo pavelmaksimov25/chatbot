@@ -347,6 +347,30 @@ describe('Auth0 BFF session (integration)', () => {
       expect(api.calls).toHaveLength(0);
     });
 
+    it('relays the edit SSE stream and requires CSRF on it', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+      api.calls.length = 0;
+
+      await agent.post('/conversations/conv-1/messages/m1/edit').send({ content: 'x' }).expect(403);
+      expect(api.calls).toHaveLength(0);
+
+      const res = await agent
+        .post('/conversations/conv-1/messages/m1/edit')
+        .set('X-CSRF-Token', session.csrfToken)
+        .send({ content: 'edited question' })
+        .buffer(true)
+        .parse((upstream, callback) => {
+          let text = '';
+          upstream.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+          upstream.on('end', () => callback(null, text));
+        })
+        .expect(200)
+        .expect('content-type', /text\/event-stream/);
+      expect(res.body).toBe(api.sseFrames.join(''));
+      expect(api.calls.some((c) => c.path === '/conversations/conv-1/messages/m1/edit')).toBe(true);
+    });
+
     it('deletes a conversation and relays the upstream 404', async () => {
       const agent = request.agent(app.getHttpServer());
       const session = await login(agent);

@@ -171,9 +171,45 @@ export class ConversationRepository implements OnModuleInit {
          RETURNING ${MESSAGE_COLUMNS}`,
         [conversationId, role, content, parentMessageId],
       );
-      await tx.query('UPDATE conversations SET updated_at = now() WHERE id = $1', [
-        conversationId,
-      ]);
+      await tx.query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
+      return toMessage(rows[0]);
+    });
+  }
+
+  /**
+   * Edit-and-regenerate, linearly (see DECISIONS.md, slice 9): the target
+   * user message and everything after it are soft-superseded (active=false,
+   * kept for audit/v2 branching), and the edited content is appended as a
+   * NEW row whose parent_message_id points at the original — the version
+   * link. Returns null when the target is not an active user message of
+   * this conversation.
+   */
+  async supersedeAndReplace(
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ): Promise<MessageRecord | null> {
+    return this.inTransaction(async (tx) => {
+      await tx.query('SELECT 1 FROM conversations WHERE id = $1 FOR UPDATE', [conversationId]);
+      const target = await tx.query<{ seq: number }>(
+        `SELECT seq FROM messages
+          WHERE id = $1 AND conversation_id = $2 AND role = 'user' AND active`,
+        [messageId, conversationId],
+      );
+      if (target.rows.length === 0) {
+        return null;
+      }
+      await tx.query(
+        'UPDATE messages SET active = false WHERE conversation_id = $1 AND seq >= $2 AND active',
+        [conversationId, target.rows[0].seq],
+      );
+      const { rows } = await tx.query<MessageRow>(
+        `INSERT INTO messages (conversation_id, role, content, seq, parent_message_id)
+         SELECT $1, 'user', $2, COALESCE(MAX(seq), 0) + 1, $3 FROM messages WHERE conversation_id = $1
+         RETURNING ${MESSAGE_COLUMNS}`,
+        [conversationId, content, messageId],
+      );
+      await tx.query('UPDATE conversations SET updated_at = now() WHERE id = $1', [conversationId]);
       return toMessage(rows[0]);
     });
   }

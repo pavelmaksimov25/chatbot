@@ -30,9 +30,9 @@ describe('ConversationRepository (postgres)', () => {
     const conversation = await repository.createConversation('auth0|alice');
     expect(conversation.userSub).toBe('auth0|alice');
     expect(conversation.title).toBeNull();
-    await expect(
-      repository.getConversation(conversation.id, 'auth0|alice'),
-    ).resolves.toMatchObject({ id: conversation.id });
+    await expect(repository.getConversation(conversation.id, 'auth0|alice')).resolves.toMatchObject(
+      { id: conversation.id },
+    );
   });
 
   it('hides foreign conversations — ownership is part of the lookup', async () => {
