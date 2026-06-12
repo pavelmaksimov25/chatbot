@@ -3,6 +3,7 @@ import Markdown from 'react-markdown';
 import { readSse } from './sse';
 
 interface ChatMessage {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
 }
@@ -22,6 +23,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string } | null>(null);
   const activeRef = useRef<string | null>(null);
 
   const refreshList = useCallback(async (): Promise<ConversationItem[]> => {
@@ -49,7 +51,9 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       const history = (await res.json()) as ChatMessage[];
       // Ignore the response if the user switched again while it loaded.
       if (activeRef.current === id) {
-        setMessages(history.map(({ role, content }) => ({ role, content })));
+        setMessages(
+          history.map(({ id: messageId, role, content }) => ({ id: messageId, role, content })),
+        );
       }
     }
   }, []);
@@ -59,7 +63,22 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     setActiveId(null);
     setMessages([]);
     setError(null);
+    setEditing(null);
+    setInput('');
     localStorage.removeItem(CONVERSATION_KEY);
+  };
+
+  const startEditing = (message: ChatMessage): void => {
+    if (!message.id || streaming) {
+      return;
+    }
+    setEditing({ id: message.id });
+    setInput(message.content);
+  };
+
+  const cancelEditing = (): void => {
+    setEditing(null);
+    setInput('');
   };
 
   // A reload resumes the last open conversation (a non-secret UUID).
@@ -96,10 +115,21 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     if (!content || streaming) {
       return;
     }
+    const editTarget = editing;
     setError(null);
     setStreaming(true);
     setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content }, { role: 'assistant', content: '' }]);
+    setEditing(null);
+    setMessages((prev) => {
+      // An edit truncates the tail locally — the server soft-supersedes it.
+      const base = editTarget
+        ? prev.slice(
+            0,
+            prev.findIndex((m) => m.id === editTarget.id),
+          )
+        : prev;
+      return [...base, { role: 'user', content }, { role: 'assistant', content: '' }];
+    });
 
     const appendToAnswer = (text: string): void =>
       setMessages((prev) => {
@@ -128,14 +158,15 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
         localStorage.setItem(CONVERSATION_KEY, id);
       }
 
-      const res = await fetch(
-        `/conversations/${encodeURIComponent(activeRef.current)}/messages`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
-          body: JSON.stringify({ content }),
-        },
-      );
+      const conversation = encodeURIComponent(activeRef.current);
+      const url = editTarget
+        ? `/conversations/${conversation}/messages/${encodeURIComponent(editTarget.id)}/edit`
+        : `/conversations/${conversation}/messages`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ content }),
+      });
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(body.message ?? 'the message could not be sent');
@@ -144,6 +175,22 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       for await (const { event, data } of readSse(res.body)) {
         if (event === 'chunk' && typeof data.text === 'string') {
           appendToAnswer(data.text);
+        } else if (event === 'done') {
+          // Adopt the persisted ids so the new turn is editable in place.
+          const userMessageId = data.userMessageId;
+          const assistantMessageId = data.assistantMessageId;
+          setMessages((prev) => {
+            const next = [...prev];
+            const user = next.at(-2);
+            const assistant = next.at(-1);
+            if (user?.role === 'user' && typeof userMessageId === 'string') {
+              next[next.length - 2] = { ...user, id: userMessageId };
+            }
+            if (assistant?.role === 'assistant' && typeof assistantMessageId === 'string') {
+              next[next.length - 1] = { ...assistant, id: assistantMessageId };
+            }
+            return next;
+          });
         } else if (event === 'error') {
           throw new Error(typeof data.message === 'string' ? data.message : 'stream failed');
         }
@@ -188,13 +235,24 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
       <section aria-label="Chat" style={{ flex: 1 }}>
         <ol>
           {messages.map((message, i) => (
-            <li key={i} data-role={message.role}>
+            <li key={message.id ?? i} data-role={message.role}>
               {message.role === 'assistant' ? (
                 // react-markdown renders to React elements — model output is
                 // never injected as raw HTML (CSP is the second net).
                 <Markdown>{message.content}</Markdown>
               ) : (
-                <p>{message.content}</p>
+                <p>
+                  {message.content}{' '}
+                  {message.id && (
+                    <button
+                      aria-label={`Edit message ${message.content.slice(0, 40)}`}
+                      onClick={() => startEditing(message)}
+                      disabled={streaming}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </p>
               )}
             </li>
           ))}
@@ -216,8 +274,13 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
             />
           </label>{' '}
           <button type="submit" disabled={streaming || input.trim().length === 0}>
-            {streaming ? 'Answering…' : 'Send'}
+            {streaming ? 'Answering…' : editing ? 'Save edit' : 'Send'}
           </button>
+          {editing && (
+            <button type="button" onClick={cancelEditing}>
+              Cancel edit
+            </button>
+          )}
         </form>
       </section>
     </div>

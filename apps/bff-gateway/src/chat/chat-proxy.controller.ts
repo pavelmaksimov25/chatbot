@@ -66,13 +66,33 @@ export class ChatProxyController {
     @Param('id') id: string,
     @Body() body: unknown,
   ): Promise<void> {
+    await this.pipeSse(req, res, `/conversations/${encodeURIComponent(id)}/messages`, body);
+  }
+
+  @Post(':id/messages/:messageId/edit')
+  async edit(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    await this.pipeSse(
+      req,
+      res,
+      `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/edit`,
+      body,
+    );
+  }
+
+  private async pipeSse(req: Request, res: Response, path: string, body: unknown): Promise<void> {
     const sub = requireSub(req);
 
     // Cancel the upstream generation when the browser goes away.
     const abort = new AbortController();
     res.on('close', () => abort.abort());
 
-    const upstream = await this.api(`/conversations/${encodeURIComponent(id)}/messages`, sub, {
+    const upstream = await this.api(path, sub, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body ?? {}),
@@ -102,7 +122,11 @@ export class ChatProxyController {
     res.end();
   }
 
-  private async api(path: string, sub: string, init: RequestInit = {}): Promise<globalThis.Response> {
+  private async api(
+    path: string,
+    sub: string,
+    init: RequestInit = {},
+  ): Promise<globalThis.Response> {
     const base = process.env.API_URL ?? 'http://localhost:3001';
     try {
       return await fetch(`${base}${path}`, {

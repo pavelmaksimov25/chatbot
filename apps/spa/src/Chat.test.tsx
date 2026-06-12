@@ -27,7 +27,7 @@ function sseResponse(frames: string[]): Response {
 interface StubOptions {
   frames?: string[];
   list?: { id: string; title: string | null; preview: string | null }[];
-  history?: Record<string, { role: string; content: string }[]>;
+  history?: Record<string, { id?: string; role: string; content: string }[]>;
 }
 
 function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
@@ -44,7 +44,7 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
     if (method === 'DELETE') {
       return Promise.resolve(new Response(null, { status: 204 }));
     }
-    const messages = /^\/conversations\/([^/]+)\/messages$/.exec(url);
+    const messages = /^\/conversations\/([^/]+)\/messages(?:\/[^/]+\/edit)?$/.exec(url);
     if (messages && method === 'POST') {
       return Promise.resolve(sseResponse(frames));
     }
@@ -167,6 +167,46 @@ describe('Chat', () => {
     const del = mock.mock.calls.find(([, init]) => init?.method === 'DELETE');
     expect(String(del![0])).toBe('/conversations/conv-1');
     expect(del![1]?.headers).toMatchObject({ 'X-CSRF-Token': 'token' });
+  });
+
+  it('edits a user message: truncates the tail and streams the new answer', async () => {
+    localStorage.setItem('conversationId', 'conv-1');
+    const mock = stubChatFetch({
+      frames: [
+        'event: chunk\ndata: {"text":"regenerated answer"}\n\n',
+        'event: done\ndata: {"userMessageId":"u1b","assistantMessageId":"a1b"}\n\n',
+      ],
+      list: [{ id: 'conv-1', title: null, preview: 'editable' }],
+      history: {
+        'conv-1': [
+          { id: 'u1', role: 'user', content: 'original question' },
+          { id: 'a1', role: 'assistant', content: 'original answer' },
+          { id: 'u2', role: 'user', content: 'follow-up' },
+          { id: 'a2', role: 'assistant', content: 'follow-up answer' },
+        ],
+      },
+    });
+    render(<Chat csrfToken="token" />);
+    await screen.findByText('original question');
+
+    fireEvent.click(screen.getByRole('button', { name: /Edit message original question/ }));
+    expect((screen.getByLabelText(/Message/) as HTMLTextAreaElement).value).toBe(
+      'original question',
+    );
+    fireEvent.change(screen.getByLabelText(/Message/), {
+      target: { value: 'edited question' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save edit' }));
+    await screen.findByText('regenerated answer');
+
+    // The old tail is gone from the view.
+    expect(screen.queryByText('original answer')).toBeNull();
+    expect(screen.queryByText('follow-up')).toBeNull();
+    expect(screen.getByText('edited question')).toBeDefined();
+
+    const edit = mock.mock.calls.find(([url]) => String(url).includes('/edit'));
+    expect(String(edit![0])).toBe('/conversations/conv-1/messages/u1/edit');
+    expect(edit![1]?.headers).toMatchObject({ 'X-CSRF-Token': 'token' });
   });
 
   it('starts a fresh chat via New chat', async () => {

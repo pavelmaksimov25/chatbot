@@ -14,11 +14,7 @@ import {
 import type { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
 import { ChatService } from './chat.service';
-import type {
-  Conversation,
-  ConversationListItem,
-  MessageRecord,
-} from './conversation.repository';
+import type { Conversation, ConversationListItem, MessageRecord } from './conversation.repository';
 
 interface SendMessageBody {
   content?: unknown;
@@ -72,9 +68,21 @@ export class ChatController {
     @Body() body: SendMessageBody,
     @Res() res: Response,
   ): Promise<void> {
-    const sub = userSub(req);
-    const stream = this.chat.streamTurn(sub, id, body.content);
+    await this.pipeStream(res, this.chat.streamTurn(userSub(req), id, body.content));
+  }
 
+  @Post(':id/messages/:messageId/edit')
+  async edit(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: SendMessageBody,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.pipeStream(res, this.chat.streamEdit(userSub(req), id, messageId, body.content));
+  }
+
+  private async pipeStream(res: Response, stream: AsyncGenerator<{ type: string }>): Promise<void> {
     // Validation/ownership failures happen before the first chunk — surface
     // them as plain HTTP errors, not as an SSE stream.
     let first: IteratorResult<unknown>;

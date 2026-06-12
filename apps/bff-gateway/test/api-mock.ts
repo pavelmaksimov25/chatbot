@@ -90,7 +90,7 @@ export class ApiMock {
       return json(res, 404, { message: 'conversation not found' });
     }
 
-    const convMessages = /^\/conversations\/([^/]+)\/messages$/.exec(path);
+    const convMessages = /^\/conversations\/([^/]+)\/messages(?:\/[^/]+\/edit)?$/.exec(path);
     if (convMessages && req.method === 'GET') {
       return json(res, 200, [
         { id: 'm1', role: 'user', content: 'hi', seq: 1 },

@@ -41,9 +41,7 @@ describe('StreamSanitizer', () => {
   });
 
   it('redacts an OpenAI-style key', () => {
-    expect(run(['sk-proj4abcdefghijklmnopqrstuv999 is the token'])).toBe(
-      '[redacted] is the token',
-    );
+    expect(run(['sk-proj4abcdefghijklmnopqrstuv999 is the token'])).toBe('[redacted] is the token');
   });
 
   it('redacts an AWS access key id', () => {
