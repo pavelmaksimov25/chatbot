@@ -6,11 +6,13 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { LoggerModule } from 'nestjs-pino';
 import { ChatController } from './chat.controller';
-import { ChatService, SYSTEM_PROMPT } from './chat.service';
+import { ChatService, SYSTEM_PROMPT, WELCOME_TRIGGER, buildSystemPrompt } from './chat.service';
 import { ConversationRepository } from './conversation.repository';
 import { PG_POOL } from '../db/db.module';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import { FakeLlmAdapter } from '../llm/fake.adapter';
+import { ProfileService } from '../profile/profile.service';
+import type { Profile } from '../profile/profile.service';
 
 jest.setTimeout(120_000);
 
@@ -39,6 +41,8 @@ describe('ChatController (integration)', () => {
   let pool: Pool;
   let app: INestApplication;
   let llm: FakeLlmAdapter;
+  // null = no profile provisioned → the generic system prompt.
+  let profile: Profile | null = null;
 
   const asAlice = { 'x-user-sub': 'auth0|alice' };
 
@@ -55,6 +59,15 @@ describe('ChatController (integration)', () => {
         ConversationRepository,
         { provide: PG_POOL, useValue: pool },
         { provide: LLM_ADAPTER, useValue: llm },
+        {
+          provide: ProfileService,
+          useValue: {
+            get: () =>
+              profile
+                ? Promise.resolve(profile)
+                : Promise.reject(Object.assign(new Error('not found'), { code: 5 })),
+          },
+        },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -72,6 +85,7 @@ describe('ChatController (integration)', () => {
     await pool.query('TRUNCATE conversations CASCADE');
     llm.requests.length = 0;
     llm.replay(['Hello', ' there', '!']);
+    profile = null;
   });
 
   async function createConversation(): Promise<string> {
@@ -382,6 +396,103 @@ describe('ChatController (integration)', () => {
         .post(`/conversations/${conversationId}/messages/${u1}/edit`)
         .set({ 'x-user-sub': 'auth0|mallory' })
         .send({ content: 'hijack' })
+        .expect(404);
+    });
+  });
+
+  describe('auto-welcome', () => {
+    const ALICE_PROFILE: Profile = {
+      sub: 'auth0|alice',
+      email: 'alice@example.com',
+      displayName: 'Alice',
+      preferences: { tone: 'casual' },
+      createdAt: '2026-06-12T00:00:00.000Z',
+      updatedAt: '2026-06-12T00:00:00.000Z',
+    };
+
+    it('streams a personalized greeting into an empty conversation and persists it', async () => {
+      profile = ALICE_PROFILE;
+      const conversationId = await createConversation();
+      llm.replay(['Hi Alice!', ' What shall we build today?']);
+
+      const res = await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/welcome`)
+        .set(asAlice)
+        .expect(200)
+        .expect('content-type', /text\/event-stream/);
+      expect(res.text).toContain('Hi Alice!');
+
+      // The provider saw the profile in the system prefix and the constant
+      // trigger as the (unpersisted) first user message.
+      const sent = llm.requests.at(-1)!;
+      expect(sent.system).toContain('Name: Alice');
+      expect(sent.system).toContain('"tone":"casual"');
+      expect(sent.messages).toEqual([{ role: 'user', content: WELCOME_TRIGGER }]);
+
+      // Persisted chain = the greeting only.
+      const messages = await request(app.getHttpServer())
+        .get(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .expect(200);
+      expect((messages.body as { role: string }[]).map((m) => m.role)).toEqual(['assistant']);
+    });
+
+    it('refuses to welcome a conversation that already has messages', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'already chatting' })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/welcome`)
+        .set(asAlice)
+        .expect(409);
+    });
+
+    it('keeps alternation valid and the prefix stable on the turn after a welcome', async () => {
+      profile = ALICE_PROFILE;
+      const conversationId = await createConversation();
+      llm.replay(['Welcome, Alice!']);
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/welcome`)
+        .set(asAlice)
+        .expect(200);
+
+      llm.replay(['Glad you asked…']);
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/messages`)
+        .set(asAlice)
+        .send({ content: 'tell me about valkey' })
+        .expect(200);
+
+      const [welcomeReq, turnReq] = llm.requests;
+      // user-first alternation: trigger → greeting → real question.
+      expect(turnReq.messages).toEqual([
+        { role: 'user', content: WELCOME_TRIGGER },
+        { role: 'assistant', content: 'Welcome, Alice!' },
+        { role: 'user', content: 'tell me about valkey' },
+      ]);
+      // The cache anchor: byte-identical system prefix across turns.
+      expect(turnReq.system).toBe(welcomeReq.system);
+      expect(turnReq.system).toBe(buildSystemPrompt(ALICE_PROFILE));
+    });
+
+    it('falls back to the generic prompt when no profile exists', async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/welcome`)
+        .set(asAlice)
+        .expect(200);
+      expect(llm.requests.at(-1)!.system).toBe(SYSTEM_PROMPT);
+    });
+
+    it("refuses to welcome another user's conversation", async () => {
+      const conversationId = await createConversation();
+      await request(app.getHttpServer())
+        .post(`/conversations/${conversationId}/welcome`)
+        .set({ 'x-user-sub': 'auth0|mallory' })
         .expect(404);
     });
   });

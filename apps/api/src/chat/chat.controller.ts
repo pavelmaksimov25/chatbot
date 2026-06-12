@@ -82,6 +82,11 @@ export class ChatController {
     await this.pipeStream(res, this.chat.streamEdit(userSub(req), id, messageId, body.content));
   }
 
+  @Post(':id/welcome')
+  async welcome(@Req() req: Request, @Param('id') id: string, @Res() res: Response): Promise<void> {
+    await this.pipeStream(res, this.chat.streamWelcome(userSub(req), id));
+  }
+
   private async pipeStream(res: Response, stream: AsyncGenerator<{ type: string }>): Promise<void> {
     // Validation/ownership failures happen before the first chunk — surface
     // them as plain HTTP errors, not as an SSE stream.

@@ -1,23 +1,36 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import type { ChatTurnMessage, LlmAdapter } from '../llm/llm-adapter';
+import { ProfileService } from '../profile/profile.service';
+import type { Profile } from '../profile/profile.service';
 import { ConversationRepository } from './conversation.repository';
 import type { Conversation, ConversationListItem, MessageRecord } from './conversation.repository';
 import { checkInput } from './input-safety';
 import { StreamSanitizer } from './stream-sanitizer';
 
-// Fixed for this slice; becomes the stable cached prefix (+ per-user welcome
-// content) in slices 10/13 — which is why it already sits at the front.
+// The STABLE prompt-cache anchor (see DECISIONS.md, slice 10): system prompt
+// + profile block must never contain timestamps or per-request data — every
+// turn of every conversation reuses it as the cached prefix (slice 13).
 export const SYSTEM_PROMPT =
   'You are a helpful, concise assistant. Answer in the language the user writes in. ' +
   'Format answers as markdown when structure helps.';
+
+/**
+ * Anthropic requires the first message to be user-role, but a welcomed
+ * conversation's persisted chain starts with the assistant greeting. This
+ * CONSTANT trigger is prepended at assembly time (never persisted) — being
+ * deterministic, it extends the stable cacheable prefix instead of breaking it.
+ */
+export const WELCOME_TRIGGER =
+  'Greet me with a short, personalized welcome and invite me to start chatting.';
 
 export type ChatStreamEvent =
   | { type: 'chunk'; text: string }
   | {
       type: 'done';
       conversationId: string;
-      userMessageId: string;
+      /** null for the auto-welcome turn — there is no user message. */
+      userMessageId: string | null;
       assistantMessageId: string;
     };
 
@@ -26,6 +39,7 @@ export class ChatService {
   constructor(
     @Inject(LLM_ADAPTER) private readonly llm: LlmAdapter,
     private readonly conversations: ConversationRepository,
+    private readonly profiles: ProfileService,
   ) {}
 
   createConversation(userSub: string): Promise<Conversation> {
@@ -68,7 +82,7 @@ export class ChatService {
       content,
       history.at(-1)?.id ?? null,
     );
-    yield* this.streamAnswer(conversationId, userMessage.id);
+    yield* this.streamAnswer(conversationId, userMessage.id, userSub);
   }
 
   /**
@@ -89,21 +103,43 @@ export class ChatService {
     if (!edited) {
       throw new NotFoundException('message not found or not editable');
     }
-    yield* this.streamAnswer(conversationId, edited.id);
+    yield* this.streamAnswer(conversationId, edited.id, userSub);
+  }
+
+  /**
+   * Auto-welcome: the first assistant message of a fresh conversation,
+   * produced by the NORMAL chat path (profile in the system prefix) — not a
+   * separate welcome subsystem. Only valid while the conversation is empty.
+   */
+  async *streamWelcome(userSub: string, conversationId: string): AsyncGenerator<ChatStreamEvent> {
+    await this.requireConversation(userSub, conversationId);
+    const existing = await this.conversations.listActiveMessages(conversationId);
+    if (existing.length > 0) {
+      throw new ConflictException('conversation already has messages');
+    }
+    yield* this.streamAnswer(conversationId, null, userSub);
   }
 
   /** The shared back half of a turn: assemble → stream sanitized → persist. */
   private async *streamAnswer(
     conversationId: string,
-    userMessageId: string,
+    userMessageId: string | null,
+    userSub: string,
   ): AsyncGenerator<ChatStreamEvent> {
     const chain: ChatTurnMessage[] = (
       await this.conversations.listActiveMessages(conversationId)
     ).map((m) => ({ role: m.role, content: m.content }));
+    // Welcomed conversations have an assistant-first chain; the provider
+    // requires user-first. The constant trigger restores alternation and,
+    // being deterministic, stays inside the cacheable prefix.
+    if (chain.length === 0 || chain[0].role === 'assistant') {
+      chain.unshift({ role: 'user', content: WELCOME_TRIGGER });
+    }
+    const system = buildSystemPrompt(await this.profileOrNull(userSub));
 
     const sanitizer = new StreamSanitizer();
     let assistantText = '';
-    for await (const delta of this.llm.streamChat({ system: SYSTEM_PROMPT, messages: chain })) {
+    for await (const delta of this.llm.streamChat({ system, messages: chain })) {
       const released = sanitizer.push(delta);
       if (released) {
         assistantText += released;
@@ -137,4 +173,31 @@ export class ChatService {
       throw new NotFoundException('conversation not found');
     }
   }
+
+  /** Cache-first profile read; a missing profile degrades to the generic prompt. */
+  private async profileOrNull(userSub: string): Promise<Profile | null> {
+    try {
+      return await this.profiles.get(userSub);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * The stable per-user prefix: generic instructions + the profile block.
+ * Deterministic by construction — no timestamps, no per-request data. It only
+ * changes when the profile changes, which is exactly when the prompt cache
+ * SHOULD be invalidated.
+ */
+export function buildSystemPrompt(profile: Profile | null): string {
+  if (!profile) {
+    return SYSTEM_PROMPT;
+  }
+  return (
+    `${SYSTEM_PROMPT}\n\n` +
+    `About the user (personalize naturally; never recite this block):\n` +
+    `Name: ${profile.displayName}\n` +
+    `Preferences: ${JSON.stringify(profile.preferences)}`
+  );
 }

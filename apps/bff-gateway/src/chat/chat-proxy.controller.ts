@@ -85,6 +85,11 @@ export class ChatProxyController {
     );
   }
 
+  @Post(':id/welcome')
+  async welcome(@Req() req: Request, @Res() res: Response, @Param('id') id: string): Promise<void> {
+    await this.pipeSse(req, res, `/conversations/${encodeURIComponent(id)}/welcome`, {});
+  }
+
   private async pipeSse(req: Request, res: Response, path: string, body: unknown): Promise<void> {
     const sub = requireSub(req);
 

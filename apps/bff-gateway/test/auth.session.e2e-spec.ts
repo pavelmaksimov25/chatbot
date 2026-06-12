@@ -371,6 +371,26 @@ describe('Auth0 BFF session (integration)', () => {
       expect(api.calls.some((c) => c.path === '/conversations/conv-1/messages/m1/edit')).toBe(true);
     });
 
+    it('relays the welcome SSE stream (CSRF-guarded)', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      await agent.post('/conversations/conv-1/welcome').expect(403);
+
+      const res = await agent
+        .post('/conversations/conv-1/welcome')
+        .set('X-CSRF-Token', session.csrfToken)
+        .buffer(true)
+        .parse((upstream, callback) => {
+          let text = '';
+          upstream.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+          upstream.on('end', () => callback(null, text));
+        })
+        .expect(200)
+        .expect('content-type', /text\/event-stream/);
+      expect(res.body).toBe(api.sseFrames.join(''));
+    });
+
     it('deletes a conversation and relays the upstream 404', async () => {
       const agent = request.agent(app.getHttpServer());
       const session = await login(agent);
