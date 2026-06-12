@@ -98,7 +98,7 @@ describe('Chat', () => {
 
   it('resumes a stored conversation on mount', async () => {
     localStorage.setItem('conversationId', 'conv-1');
-    const mock = vi.fn((_url: RequestInfo | URL) =>
+    const mock = vi.fn<(url: RequestInfo | URL) => Promise<Response>>(() =>
       Promise.resolve(
         Response.json([
           { role: 'user', content: 'earlier question' },
