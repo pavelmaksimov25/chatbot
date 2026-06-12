@@ -1,0 +1,127 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpException,
+  Param,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { PinoLogger } from 'nestjs-pino';
+import { ChatService } from './chat.service';
+import type { Conversation, MessageRecord } from './conversation.repository';
+
+interface SendMessageBody {
+  content?: unknown;
+}
+
+export interface MessageView {
+  id: string;
+  role: string;
+  content: string;
+  seq: number;
+  createdAt: string;
+}
+
+// Internal surface for the BFF — never exposed through Caddy directly. The
+// BFF injects the authenticated subject; see DECISIONS.md (slice 7).
+@Controller('conversations')
+export class ChatController {
+  constructor(
+    private readonly chat: ChatService,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(ChatController.name);
+  }
+
+  @Post()
+  create(@Req() req: Request): Promise<Conversation> {
+    return this.chat.createConversation(userSub(req));
+  }
+
+  @Get(':id/messages')
+  async list(@Req() req: Request, @Param('id') id: string): Promise<MessageView[]> {
+    const messages = await this.chat.listMessages(userSub(req), id);
+    return messages.map(toView);
+  }
+
+  @Post(':id/messages')
+  async send(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: SendMessageBody,
+    @Res() res: Response,
+  ): Promise<void> {
+    const sub = userSub(req);
+    const stream = this.chat.streamTurn(sub, id, body.content);
+
+    // Validation/ownership failures happen before the first chunk — surface
+    // them as plain HTTP errors, not as an SSE stream.
+    let first: IteratorResult<unknown>;
+    try {
+      first = await stream.next();
+    } catch (err) {
+      if (err instanceof HttpException) {
+        res.status(err.getStatus()).json(err.getResponse());
+        return;
+      }
+      this.logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'chat turn failed before streaming',
+      );
+      res.status(502).json({ message: 'the model is unavailable, try again' });
+      return;
+    }
+
+    res.status(200);
+    res.setHeader('content-type', 'text/event-stream');
+    res.setHeader('cache-control', 'no-cache, no-transform');
+    res.setHeader('connection', 'keep-alive');
+    res.setHeader('x-accel-buffering', 'no');
+    res.flushHeaders();
+
+    try {
+      for (let result = first; !result.done; result = await stream.next()) {
+        if (res.closed) {
+          // Client went away: stop generating; the turn is not persisted.
+          await stream.return(undefined);
+          break;
+        }
+        const event = result.value as { type: string };
+        writeEvent(res, event.type, event);
+      }
+    } catch (err) {
+      this.logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'chat stream failed mid-turn',
+      );
+      writeEvent(res, 'error', { message: 'the answer was interrupted, try again' });
+    }
+    res.end();
+  }
+}
+
+function writeEvent(res: Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function userSub(req: Request): string {
+  const sub = req.headers['x-user-sub'];
+  if (typeof sub !== 'string' || sub.length === 0) {
+    throw new UnauthorizedException('missing user identity');
+  }
+  return sub;
+}
+
+function toView(message: MessageRecord): MessageView {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    seq: message.seq,
+    createdAt: message.createdAt.toISOString(),
+  };
+}

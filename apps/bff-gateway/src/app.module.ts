@@ -5,6 +5,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionService } from './auth/session.service';
+import { ChatModule } from './chat/chat.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { PingModule } from './ping/ping.module';
@@ -23,6 +24,7 @@ import { PingModule } from './ping/ping.module';
     MetricsModule,
     PingModule,
     AuthModule,
+    ChatModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
 })

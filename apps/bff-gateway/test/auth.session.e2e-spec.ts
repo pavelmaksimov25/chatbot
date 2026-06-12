@@ -266,6 +266,73 @@ describe('Auth0 BFF session (integration)', () => {
     });
   });
 
+  describe('chat proxy (/conversations)', () => {
+    beforeEach(() => {
+      api.calls.length = 0;
+    });
+
+    it('answers 401 without a session', async () => {
+      await request(app.getHttpServer()).post('/conversations').expect(401);
+      await request(app.getHttpServer()).get('/conversations/conv-1/messages').expect(401);
+      expect(api.calls).toHaveLength(0);
+    });
+
+    it('rejects mutating chat calls without the CSRF token', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      api.calls.length = 0;
+
+      await agent.post('/conversations').expect(403);
+      await agent.post('/conversations/conv-1/messages').send({ content: 'hi' }).expect(403);
+      expect(api.calls).toHaveLength(0);
+    });
+
+    it('creates a conversation stamped with the session sub', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      const res = await agent
+        .post('/conversations')
+        .set('X-CSRF-Token', session.csrfToken)
+        .expect(201);
+      expect(res.body).toMatchObject({ id: 'conv-1', userSub: 'auth0|user-1' });
+    });
+
+    it('relays the SSE stream untouched, frame for frame', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const session = await login(agent);
+
+      const res = await agent
+        .post('/conversations/conv-1/messages')
+        .set('X-CSRF-Token', session.csrfToken)
+        .send({ content: 'hi' })
+        .buffer(true)
+        .parse((upstream, callback) => {
+          let text = '';
+          upstream.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+          upstream.on('end', () => callback(null, text));
+        })
+        .expect(200)
+        .expect('content-type', /text\/event-stream/);
+
+      expect(res.body).toBe(api.sseFrames.join(''));
+      const sent = api.calls.find(
+        (c) => c.method === 'POST' && c.path === '/conversations/conv-1/messages',
+      );
+      expect(sent?.body).toEqual({ content: 'hi' });
+    });
+
+    it('fetches the message history through the proxy', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      const res = await agent.get('/conversations/conv-1/messages').expect(200);
+      expect((res.body as { content: string }[]).map((m) => m.content)).toEqual([
+        'hi',
+        'Hello world',
+      ]);
+    });
+  });
+
   describe('silent re-auth (refresh rotation)', () => {
     it('refreshes an expiring access token server-side and rotates the refresh token', async () => {
       oidc.nextExpiresIn = 1; // lands inside the refresh-ahead window immediately
