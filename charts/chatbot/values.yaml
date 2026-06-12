@@ -37,6 +37,9 @@ services:
       ANTHROPIC_API_KEY: { secret: chatbot-llm, key: ANTHROPIC_API_KEY }
       OPENAI_API_KEY: { secret: chatbot-llm, key: OPENAI_API_KEY }
       GEMINI_API_KEY: { secret: chatbot-llm, key: GEMINI_API_KEY }
+      VAULT_TOKEN: { secret: chatbot-vault, key: VAULT_DEV_ROOT_TOKEN }
+      MINIO_ACCESS_KEY: { secret: chatbot-minio, key: MINIO_ROOT_USER }
+      MINIO_SECRET_KEY: { secret: chatbot-minio, key: MINIO_ROOT_PASSWORD }
   user-service:
     port: 3002
     grpcPort: 50051

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Chat } from './Chat';
+import { Files } from './Files';
 
 interface Me {
   sub: string;
@@ -119,6 +120,7 @@ function SignedIn({ me }: { me: Me }) {
       <h1>Chatbot</h1>
       <p>Signed in as {profile?.displayName ?? me.name ?? me.email}</p>
       <Chat csrfToken={me.csrfToken} />
+      <Files csrfToken={me.csrfToken} />
       {profile && (
         <section aria-label="Profile">
           <label>

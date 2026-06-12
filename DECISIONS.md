@@ -5,6 +5,32 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 14 — Encrypted file storage
+
+- **Vault Transit's `datakey` endpoint IS the envelope** — it generates the
+  per-user DEK and returns it already wrapped by the KEK; the api never makes
+  key material, it only holds a plaintext DEK transiently per request.
+  Encryption of the file bytes is AES-256-GCM via node:crypto (AEAD —
+  tampered ciphertext fails the tag check instead of decrypting to garbage);
+  nonce + tag live next to the metadata, ciphertext in MinIO, wrapped DEK in
+  the DB. No hand-rolled key management anywhere.
+- **One DEK per user, not per file.** KEK rotation then re-wraps N users
+  instead of N files (`transit/rewrap`, object bytes untouched — verified in
+  tests), and a per-user DEK is what the design doc's blast-radius argument
+  assumed. First-writer-wins on concurrent first uploads (`ON CONFLICT`
+  returning the winning row).
+- **The ~25K-token post-extraction cap uses a chars/4 estimate for text**
+  this slice. Real extraction (PDF text, image vision sizing) arrives with
+  file-in-chat (slice 15), which is where "post-extraction" becomes
+  measurable; the raw 5MB cap is exact today. Both caps reject with the
+  limit in the message and persist nothing — never a silent truncation.
+- **`rotate-kek` is an internal ops endpoint on the api, deliberately NOT
+  proxied through the BFF** — rotation is an operator action, not a user
+  feature.
+- **Honest boundary held (from the design doc):** this is encryption at
+  rest + blast-radius limiting, not zero-knowledge — the api and the LLM
+  provider see plaintext during processing.
+
 ## Slice 13 — Anthropic prompt caching
 
 - **Two `cache_control` breakpoints, in the Anthropic provider only:** the
