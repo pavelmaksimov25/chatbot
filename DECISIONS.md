@@ -5,6 +5,28 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 13 — Anthropic prompt caching
+
+- **Two `cache_control` breakpoints, in the Anthropic provider only:** the
+  stable system block, and the newest message of every request. Each turn
+  re-reads the prefix the previous turn cached and extends it by one
+  exchange. OpenAI and Gemini cache automatically — caching is a
+  provider-specific concern that stays behind the adapter seam, untouched by
+  ChatService. Rejected: a breakpoint per message (Anthropic caps breakpoints
+  at 4; the newest-message pattern is the documented incremental idiom).
+- **Prefix discipline was already done** — the deterministic system prompt
+  (slice 10) and the constant welcome trigger ARE the discipline; the
+  byte-identical-prefix test from slice 10 is the regression guard. Nothing
+  volatile sits ahead of the breakpoints.
+- **Caveat owned: Anthropic ignores `cache_control` below a ~1024-token
+  minimum cacheable prefix (Sonnet).** Short conversations simply don't cache
+  — requests stay valid, nothing breaks, and the cache engages exactly when
+  it starts mattering. The live verification therefore uses a deliberately
+  long first message.
+- **Cache effectiveness is observable, not assumed:** `message_start` usage
+  events feed `llm_cache_{read,creation}_tokens_total` + `llm_input_tokens_total`
+  Prometheus counters and a per-turn pino log line.
+
 ## Slice 12 — Concurrency admission + per-provider rate limiting
 
 - **One semaphore around the whole LLM call** (slot held from dispatch until
