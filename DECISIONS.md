@@ -5,6 +5,32 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 12 — Concurrency admission + per-provider rate limiting
+
+- **One semaphore around the whole LLM call** (slot held from dispatch until
+  the stream finishes), FIFO queue with a hard cap → queue overflow answers
+  503 "at capacity". Implemented as a decorator around the fallback adapter so
+  ChatService stays untouched. Defaults: DEFAULT=4, MAX=16, QUEUE=100
+  (`LLM_CONCURRENCY_DEFAULT/MAX`, `LLM_QUEUE_MAX`).
+- **Concurrency rises from DEFAULT toward MAX only on FRESH positive header
+  evidence** (less than 60 s old, above floors of 2 requests / 10 k tokens)
+  from the lead configured provider. Unknown or stale headroom is NOT
+  optimistically trusted — the spec's "admit more only when headers show
+  headroom", taken literally. Anthropic/OpenAI seed the registry from their
+  rate-limit response headers via the SDKs' `withResponse()`.
+- **Gemini gets a circuit breaker, not header tracking** — it has no reliable
+  per-response headroom headers. A 429/RESOURCE_EXHAUSTED trips the circuit
+  for the server-returned `retryDelay` (default 30 s when absent); the
+  fallback walk skips open circuits and names them in the all-failed 503.
+- **Headroom floors are conservative constants, not config** — the values
+  (2 requests, 10 k tokens) only gate the DEFAULT→MAX upgrade; getting them
+  wrong degrades to DEFAULT, which is always safe. Making them env knobs
+  invites tuning theater.
+- **Prometheus gauges** (`llm_in_flight`, `llm_queued`,
+  `llm_concurrency_limit`, `llm_provider_requests_remaining`) make admission
+  observable — they are how the behavior is verified live and what the
+  Grafana dashboard (slice 20) will plot.
+
 ## Slice 11 — Multi-provider fallback + tier mapping
 
 - **Provider order is FIXED: Anthropic → OpenAI → Gemini** (availability-first

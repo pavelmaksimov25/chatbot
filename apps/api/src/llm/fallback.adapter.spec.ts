@@ -2,6 +2,7 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { FallbackLlmAdapter } from './fallback.adapter';
 import type { LlmProvider, StreamChatRequest } from './llm-adapter';
+import { ProviderLimitsRegistry } from './provider-limits';
 
 const REQUEST: StreamChatRequest = { system: 'sys', messages: [{ role: 'user', content: 'q' }] };
 
@@ -13,7 +14,10 @@ interface FakeProviderOptions {
   hangForever?: boolean;
 }
 
-function fakeProvider(name: string, options: FakeProviderOptions = {}): LlmProvider & {
+function fakeProvider(
+  name: string,
+  options: FakeProviderOptions = {},
+): LlmProvider & {
   calls: number;
 } {
   const {
@@ -57,9 +61,12 @@ async function collect(iterable: AsyncIterable<string>): Promise<string[]> {
   return out;
 }
 
+let registry: ProviderLimitsRegistry;
+
 function adapterWith(...providers: LlmProvider[]): FallbackLlmAdapter {
   const logger = { setContext: jest.fn(), warn: jest.fn() } as unknown as PinoLogger;
-  return new FallbackLlmAdapter(providers, logger);
+  registry = new ProviderLimitsRegistry();
+  return new FallbackLlmAdapter(providers, logger, registry);
 }
 
 describe('FallbackLlmAdapter', () => {
@@ -144,6 +151,26 @@ describe('FallbackLlmAdapter', () => {
     expect(received).toEqual(['one', 'two']);
     expect((error as Error).message).toContain('died mid-stream');
     expect(backup.calls).toBe(0);
+  });
+
+  it('skips a provider whose circuit is open without calling it', async () => {
+    const primary = fakeProvider('gemini', { chunks: ['should be skipped'] });
+    const backup = fakeProvider('openai', { chunks: ['served instead'] });
+    const adapter = adapterWith(primary, backup);
+    registry.trip('gemini', 60_000);
+
+    await expect(collect(adapter.streamChat(REQUEST))).resolves.toEqual(['served instead']);
+    expect(primary.calls).toBe(0);
+  });
+
+  it('names the open circuit in the 503 when nothing else is available', async () => {
+    const only = fakeProvider('gemini', { chunks: ['unreachable'] });
+    const adapter = adapterWith(only);
+    registry.trip('gemini', 60_000);
+
+    const error = await collect(adapter.streamChat(REQUEST)).catch((err) => err);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect((error as Error).message).toContain('gemini: circuit open');
   });
 
   it('falls back when the primary never produces a first token (timeout)', async () => {
