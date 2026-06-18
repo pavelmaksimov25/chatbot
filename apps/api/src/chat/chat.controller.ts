@@ -57,6 +57,14 @@ export class ChatController {
     await this.chat.deleteConversation(userSub(req), id);
   }
 
+  @Get(':id/suggestions')
+  suggestions(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ): Promise<{ forMessageId: string | null; suggestions: string[] }> {
+    return this.chat.getSuggestions(userSub(req), id);
+  }
+
   @Get(':id/messages')
   async list(@Req() req: Request, @Param('id') id: string): Promise<MessageView[]> {
     const messages = await this.chat.listMessages(userSub(req), id);

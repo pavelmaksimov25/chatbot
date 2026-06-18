@@ -27,6 +27,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const [attachment, setAttachment] = useState<{ id: string; name: string } | null>(null);
+  const [chips, setChips] = useState<string[]>([]);
   const [attaching, setAttaching] = useState(false);
   const activeRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
@@ -64,11 +65,12 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
 
   /** Reads an SSE answer stream into the trailing assistant message. */
   const consumeStream = useCallback(
-    async (res: Response): Promise<void> => {
+    async (res: Response): Promise<string | null> => {
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(body.message ?? 'the message could not be sent');
       }
+      let doneAssistantId: string | null = null;
       for await (const { event, data } of readSse(res.body)) {
         if (event === 'chunk' && typeof data.text === 'string') {
           appendToAnswer(data.text);
@@ -76,6 +78,9 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
           // Adopt the persisted ids so the new turn is editable in place.
           const userMessageId = data.userMessageId;
           const assistantMessageId = data.assistantMessageId;
+          if (typeof assistantMessageId === 'string') {
+            doneAssistantId = assistantMessageId;
+          }
           setMessages((prev) => {
             const next = [...prev];
             const user = next.at(-2);
@@ -92,8 +97,36 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
           throw new Error(typeof data.message === 'string' ? data.message : 'stream failed');
         }
       }
+      return doneAssistantId;
     },
     [appendToAnswer],
+  );
+
+  /** Chips arrive a beat after the answer — poll briefly, then give up quietly. */
+  const pollChips = useCallback(
+    async (conversationId: string, assistantId: string | null) => {
+      if (!assistantId) {
+        return;
+      }
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (activeRef.current !== conversationId) {
+          return; // user moved on
+        }
+        const res = await fetch(
+          `/conversations/${encodeURIComponent(conversationId)}/suggestions`,
+        ).catch(() => null);
+        if (res?.ok) {
+          const body = (await res.json()) as { forMessageId: string | null; suggestions: string[] };
+          if (body.forMessageId === assistantId && body.suggestions.length > 0) {
+            setChips(body.suggestions);
+            void refreshList(); // the async title has likely landed too
+            return;
+          }
+        }
+      }
+    },
+    [refreshList],
   );
 
   const createConversation = useCallback(async (): Promise<string> => {
@@ -118,6 +151,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     setEditing(null);
     setInput('');
     setError(null);
+    setChips([]);
     setStreamingState(true);
     setMessages([{ role: 'assistant', content: '' }]);
     try {
@@ -126,8 +160,9 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken },
       });
-      await consumeStream(res);
+      const assistantId = await consumeStream(res);
       void refreshList();
+      void pollChips(id, assistantId);
     } catch (err) {
       dropEmptyAnswer();
       setError(err instanceof Error ? err.message : 'something went wrong');
@@ -141,6 +176,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     setActiveId(id);
     localStorage.setItem(CONVERSATION_KEY, id);
     setError(null);
+    setChips([]);
     const res = await fetch(`/conversations/${encodeURIComponent(id)}/messages`).catch(() => null);
     if (res?.status === 404) {
       // Deleted elsewhere; fall back to a blank state.
@@ -171,6 +207,7 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     setError(null);
     setEditing(null);
     setInput('');
+    setChips([]);
     localStorage.removeItem(CONVERSATION_KEY);
   };
 
@@ -246,14 +283,15 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  const send = async (): Promise<void> => {
-    const content = input.trim();
+  const send = async (contentOverride?: string): Promise<void> => {
+    const content = (contentOverride ?? input).trim();
     if (!content || streaming) {
       return;
     }
     const editTarget = editing;
     const attached = attachment;
     setError(null);
+    setChips([]);
     setStreamingState(true);
     setInput('');
     setEditing(null);
@@ -286,8 +324,9 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
         headers: { 'content-type': 'application/json', 'X-CSRF-Token': csrfToken },
         body: JSON.stringify({ content, ...(attached && { fileIds: [attached.id] }) }),
       });
-      await consumeStream(res);
+      const assistantId = await consumeStream(res);
       void refreshList(); // ordering + preview may have changed
+      void pollChips(activeRef.current!, assistantId);
     } catch (err) {
       dropEmptyAnswer();
       setError(err instanceof Error ? err.message : 'something went wrong');
@@ -352,6 +391,15 @@ export function Chat({ csrfToken }: { csrfToken: string }) {
             </li>
           ))}
         </ol>
+        {chips.length > 0 && (
+          <p aria-label="Suggestions">
+            {chips.map((chip) => (
+              <button key={chip} onClick={() => void send(chip)} disabled={streaming}>
+                {chip}
+              </button>
+            ))}
+          </p>
+        )}
         {error && <p role="alert">{error}</p>}
         <form
           onSubmit={(e) => {

@@ -89,6 +89,8 @@ export class ConversationRepository implements OnModuleInit {
         ON messages (conversation_id, seq);
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS flagged boolean NOT NULL DEFAULT false;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS flag_reason text;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS suggestions text[] NOT NULL DEFAULT '{}';
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS suggestions_for uuid;
       CREATE TABLE IF NOT EXISTS message_files (
         message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         -- No FK to files: the files table is owned by another module whose
@@ -133,6 +135,43 @@ export class ConversationRepository implements OnModuleInit {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
+  }
+
+  /** Chips for the LATEST answer only; forMessageId tells the SPA which one. */
+  async setSuggestions(
+    conversationId: string,
+    forMessageId: string,
+    suggestions: string[],
+  ): Promise<void> {
+    await this.pool.query(
+      'UPDATE conversations SET suggestions = $2, suggestions_for = $3 WHERE id = $1',
+      [conversationId, suggestions, forMessageId],
+    );
+  }
+
+  async getSuggestions(
+    conversationId: string,
+    userSub: string,
+  ): Promise<{ forMessageId: string | null; suggestions: string[] } | null> {
+    const { rows } = await this.pool.query<{
+      suggestions: string[];
+      suggestions_for: string | null;
+    }>('SELECT suggestions, suggestions_for FROM conversations WHERE id = $1 AND user_sub = $2', [
+      conversationId,
+      userSub,
+    ]);
+    return rows[0]
+      ? { forMessageId: rows[0].suggestions_for, suggestions: rows[0].suggestions }
+      : null;
+  }
+
+  /** First generated title wins; a user-visible title is never overwritten. */
+  async setTitleIfEmpty(conversationId: string, title: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      'UPDATE conversations SET title = $2 WHERE id = $1 AND title IS NULL',
+      [conversationId, title],
+    );
+    return (rowCount ?? 0) > 0;
   }
 
   /** Hard delete; messages go with it (FK CASCADE). Foreign = not found. */

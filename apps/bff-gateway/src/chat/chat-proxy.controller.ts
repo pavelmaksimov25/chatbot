@@ -48,6 +48,19 @@ export class ChatProxyController {
     res.status(upstream.status).json(await upstream.json().catch(() => ({})));
   }
 
+  @Get(':id/suggestions')
+  async suggestions(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Param('id') id: string,
+  ): Promise<void> {
+    const upstream = await this.api(
+      `/conversations/${encodeURIComponent(id)}/suggestions`,
+      requireSub(req),
+    );
+    res.status(upstream.status).json(await upstream.json());
+  }
+
   @Get(':id/messages')
   async messages(
     @Req() req: Request,

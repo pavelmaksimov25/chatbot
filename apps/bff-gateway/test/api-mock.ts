@@ -80,6 +80,14 @@ export class ApiMock {
       ]);
     }
 
+    const convSuggestions = /^\/conversations\/([^/]+)\/suggestions$/.exec(path);
+    if (convSuggestions && req.method === 'GET') {
+      return json(res, 200, {
+        forMessageId: 'm2',
+        suggestions: ['Tell me more?', 'Show an example?'],
+      });
+    }
+
     const convDelete = /^\/conversations\/([^/]+)$/.exec(path);
     if (convDelete && req.method === 'DELETE') {
       if (convDelete[1] === 'conv-1') {
