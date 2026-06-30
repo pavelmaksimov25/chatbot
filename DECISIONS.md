@@ -5,6 +5,47 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Refactor — Prisma migrations
+
+- **The "tracer-bullet migration" (idempotent DDL in each repository's
+  `onModuleInit`) is replaced by Prisma Migrate.** Schema now lives in
+  `apps/{api,user-service}/prisma/schema.prisma`; the DDL that was inline in
+  `ConversationRepository`/`FileRepository`/`ProfileRepository` is a versioned
+  baseline migration under `prisma/migrations/<ts>_init/`. The repos no longer
+  create their own schema.
+- **One Prisma schema + client per service, not a shared one.** Each service
+  reaches only its own logical database (the values.yaml ownership rule); a
+  shared schema would model tables a service must never touch.
+- **Prisma 7 with the `@prisma/adapter-pg` driver adapter** (Rust-engine-free).
+  It reuses the `pg` driver already in the repo, so the runtime keeps one
+  Postgres driver and the image carries no engine binary. `PrismaService`
+  builds the adapter from the same `DB_*` env the old `pg` Pool used — no
+  `DATABASE_URL` needed at runtime.
+- **Clean CRUD → Prisma Client; Postgres-specific queries stay raw via typed
+  `$queryRaw`.** The seq-allocating `FOR UPDATE` transaction, the `array_agg`
+  history join, the conditional-`updated_at` upsert, and the correlated preview
+  subquery have no clean Client form, so they remain SQL inside interactive
+  `$transaction`s — exactly the serialization the old code had. CRUD that maps
+  cleanly (create/find/updateMany/deleteMany/upsert) uses the Client.
+- **`messages.role` `CHECK (… IN (…))` becomes a Postgres `enum`** — Prisma's
+  canonical form. The baseline migration recreates the column as the enum type,
+  so it assumes a fresh dev database (acceptable here; no prod data to migrate).
+- **Migrations run in a Helm `initContainer` (`prisma migrate deploy`) on the
+  db-bearing services**, from the same image (so CLI + schema + migrations ship
+  together). `prisma.config.ts` composes the CLI's `DATABASE_URL` from the
+  `DB_*` parts (password URL-encoded in TS, not fragile shell), so the
+  initContainer needs no extra secret. The `prisma` CLI moved to
+  `dependencies` so it survives `pnpm deploy --prod`.
+- **The generated client is committed** (`src/generated/prisma`, excluded from
+  lint/format). Prisma 7 emits it in-tree; committing avoids a generate step in
+  CI and dodges the Docker layer-cache ordering (install precedes source copy).
+  The Docker build still regenerates (`db:generate`) so the image is
+  authoritative if the committed copy drifts.
+- **Jest needs two shims for the Prisma-7 client:** a `moduleNameMapper` to
+  strip the ESM-style `.js` import specifiers the generator emits (ts-jest's
+  CommonJS resolver can't map `.js`→`.ts`), and `--experimental-vm-modules` so
+  the WASM query compiler's dynamic `import()` is allowed in the test VM.
+
 ## Slice 17 — Suggestion chips + conversation titles
 
 - **Both jobs ride the slice-16 BullMQ infra on a second queue (`post-turn`),

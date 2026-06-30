@@ -1,29 +1,28 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
-import { Pool } from 'pg';
 import Redis from 'ioredis';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 
-export { PG_POOL };
 export const VALKEY = 'VALKEY';
 
 @Injectable()
 export class StoreHealthService implements OnModuleDestroy {
   constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly prisma: PrismaService,
     @Inject(VALKEY) private readonly valkeyClient: Redis,
     private readonly indicator: HealthIndicatorService,
   ) {}
 
   async onModuleDestroy(): Promise<void> {
-    // The pool belongs to DbModule; only the valkey probe client is ours.
+    // The Prisma connection belongs to PrismaModule; only the valkey probe
+    // client is ours to close.
     await this.valkeyClient.quit().catch(() => undefined);
   }
 
   postgres(): Promise<HealthIndicatorResult> {
     return this.probe('postgres', async () => {
-      await this.pool.query('SELECT 1');
+      await this.prisma.$queryRaw`SELECT 1`;
     });
   }
 

@@ -3,3 +3,5 @@ coverage/
 pnpm-lock.yaml
 HANDOFF.md
 charts/
+**/generated/
+**/prisma/migrations/

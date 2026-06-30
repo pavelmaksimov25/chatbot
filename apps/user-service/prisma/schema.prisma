@@ -1,0 +1,24 @@
+// Prisma 7: the `prisma-client` generator emits a portable client (no Rust
+// engine) into the source tree; the app wires it to the existing `pg` driver
+// via @prisma/adapter-pg. `url` here is used only by the Prisma CLI
+// (migrate/generate) — the running service builds its adapter from DB_* env.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model UserProfile {
+  sub         String   @id
+  email       String
+  displayName String   @map("display_name")
+  preferences Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("user_profiles")
+}

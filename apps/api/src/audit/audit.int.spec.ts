@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Pool } from 'pg';
@@ -8,11 +10,15 @@ import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { LoggerModule } from 'nestjs-pino';
 import type { Queue } from 'bullmq';
 import { getQueueToken } from '@nestjs/bullmq';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuditModule } from './audit.module';
 import { AuditService, OUTPUT_AUDIT_QUEUE } from './audit.service';
 
 jest.setTimeout(180_000);
+
+// apps/api — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
 
 async function until(check: () => Promise<boolean>, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -44,23 +50,25 @@ describe('Output audit (integration)', () => {
     delete process.env.VALKEY_PASSWORD;
 
     pool = new Pool({ connectionString: postgres.getConnectionUri() });
-    await pool.query(`
-      CREATE TABLE conversations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_sub text NOT NULL);
-      CREATE TABLE messages (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        conversation_id uuid REFERENCES conversations(id) ON DELETE CASCADE,
-        content text NOT NULL,
-        flagged boolean NOT NULL DEFAULT false,
-        flag_reason text
-      );
-    `);
+    // Apply the real migration files — same schema prod runs against.
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: postgres.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    process.env.DB_HOST = postgres.getHost();
+    process.env.DB_PORT = String(postgres.getPort());
+    process.env.DB_USER = postgres.getUsername();
+    process.env.DB_PASSWORD = postgres.getPassword();
+    process.env.DB_NAME = postgres.getDatabase();
+    const prisma = new PrismaService();
 
     // BullModule.forRootAsync reads env at bootstrap — set above, safe here.
     const moduleRef = await Test.createTestingModule({
       imports: [LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }), AuditModule],
     })
-      .overrideProvider(PG_POOL)
-      .useValue(pool)
+      .overrideProvider(PrismaService)
+      .useValue(prisma)
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -70,8 +78,9 @@ describe('Output audit (integration)', () => {
   });
 
   afterAll(async () => {
-    // app.close() ends the pool too — DbModule's lifecycle owns the override.
+    // app.close() disconnects the Prisma override; the assertion pool is ours.
     await app?.close();
+    await pool?.end();
     await Promise.allSettled([redis?.stop(), postgres?.stop()]);
   });
 
@@ -80,7 +89,8 @@ describe('Output audit (integration)', () => {
       "INSERT INTO conversations (user_sub) VALUES ('auth0|alice') RETURNING id",
     );
     const msg = await pool.query<{ id: string }>(
-      'INSERT INTO messages (conversation_id, content) VALUES ($1, $2) RETURNING id',
+      `INSERT INTO messages (conversation_id, role, content, seq)
+       VALUES ($1, 'user', $2, 1) RETURNING id`,
       [conv.rows[0].id, content],
     );
     return { conversationId: conv.rows[0].id, id: msg.rows[0].id };

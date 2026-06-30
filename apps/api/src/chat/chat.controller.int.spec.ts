@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -8,7 +10,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { ChatController } from './chat.controller';
 import { ChatService, SYSTEM_PROMPT, WELCOME_TRIGGER, buildSystemPrompt } from './chat.service';
 import { ConversationRepository } from './conversation.repository';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import { FakeLlmAdapter } from '../llm/fake.adapter';
 import { ProfileService } from '../profile/profile.service';
@@ -19,6 +21,10 @@ import { PostTurnService } from '../post-turn/post-turn.service';
 import { NotFoundException } from '@nestjs/common';
 
 jest.setTimeout(120_000);
+
+// apps/api — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
 
 interface SseEvent {
   event: string;
@@ -58,6 +64,16 @@ describe('ChatController (integration)', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine').start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: container.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    process.env.DB_HOST = container.getHost();
+    process.env.DB_PORT = String(container.getPort());
+    process.env.DB_USER = container.getUsername();
+    process.env.DB_PASSWORD = container.getPassword();
+    process.env.DB_NAME = container.getDatabase();
     llm = new FakeLlmAdapter(['Hello', ' there', '!']);
 
     const moduleRef = await Test.createTestingModule({
@@ -66,7 +82,7 @@ describe('ChatController (integration)', () => {
       providers: [
         ChatService,
         ConversationRepository,
-        { provide: PG_POOL, useValue: pool },
+        { provide: PrismaService, useValue: new PrismaService() },
         { provide: LLM_ADAPTER, useValue: llm },
         {
           provide: ProfileService,
@@ -105,7 +121,6 @@ describe('ChatController (integration)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    await moduleRef.get(ConversationRepository).onModuleInit();
   });
 
   afterAll(async () => {

@@ -1,31 +1,49 @@
-import { Pool } from 'pg';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { PrismaService } from '../prisma/prisma.service';
 import { ProfileRepository } from './profile.repository';
 
 jest.setTimeout(120_000);
 
+// apps/user-service — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
+
 // Real-Postgres integration test: the repository is all SQL, so mocking the
-// pool would test nothing. Same image the chart deploys.
+// client would test nothing. Same image the chart deploys, and we apply the
+// actual migration files via `migrate deploy` — exactly what runs in prod.
 describe('ProfileRepository (postgres)', () => {
   let container: StartedPostgreSqlContainer;
-  let pool: Pool;
+  let prisma: PrismaService;
   let repository: ProfileRepository;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine').start();
-    pool = new Pool({ connectionString: container.getConnectionUri() });
-    repository = new ProfileRepository(pool);
-    await repository.onModuleInit();
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: container.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    // PrismaService builds its pg adapter from the DB_* env, like the deployment.
+    process.env.DB_HOST = container.getHost();
+    process.env.DB_PORT = String(container.getPort());
+    process.env.DB_USER = container.getUsername();
+    process.env.DB_PASSWORD = container.getPassword();
+    process.env.DB_NAME = container.getDatabase();
+    prisma = new PrismaService();
+    await prisma.$connect();
+    repository = new ProfileRepository(prisma);
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await prisma?.$disconnect();
     await container?.stop();
   });
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE user_profiles');
+    await prisma.$executeRawUnsafe('TRUNCATE user_profiles');
   });
 
   it('ensure creates a profile with empty preferences', async () => {
@@ -50,7 +68,9 @@ describe('ProfileRepository (postgres)', () => {
     expect(again.email).toBe('new@example.com');
     expect(again.displayName).toBe('Ace');
 
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM user_profiles');
+    const rows = await prisma.$queryRaw<
+      { n: number }[]
+    >`SELECT count(*)::int AS n FROM user_profiles`;
     expect(rows[0].n).toBe(1);
   });
 

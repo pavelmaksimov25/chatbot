@@ -1,0 +1,92 @@
+// Prisma 7: the `prisma-client` generator emits a portable client (no Rust
+// engine) into the source tree; the app wires it to the existing `pg` driver
+// via @prisma/adapter-pg. `url` lives in prisma.config.ts (CLI-only) — the
+// running service builds its adapter from DB_* env.
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+model Conversation {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userSub        String    @map("user_sub")
+  title          String?
+  // Chips for the latest answer only; suggestionsFor names which message.
+  suggestions    String[]  @default([])
+  suggestionsFor String?   @map("suggestions_for") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  messages       Message[]
+
+  @@index([userSub, updatedAt(sort: Desc)], map: "conversations_user_idx")
+  @@map("conversations")
+}
+
+model Message {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String      @map("conversation_id") @db.Uuid
+  role            MessageRole
+  content         String
+  seq             Int
+  active          Boolean     @default(true)
+  // Seam for v2 branching/versioned edits; written, not yet queried.
+  parentMessageId String?     @map("parent_message_id") @db.Uuid
+  flagged         Boolean     @default(false)
+  flagReason      String?     @map("flag_reason")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parent       Message?      @relation("MessageVersions", fields: [parentMessageId], references: [id])
+  versions     Message[]     @relation("MessageVersions")
+  files        MessageFile[]
+
+  @@unique([conversationId, seq])
+  @@index([conversationId, seq], map: "messages_conversation_idx")
+  @@map("messages")
+}
+
+model MessageFile {
+  messageId String @map("message_id") @db.Uuid
+  // No FK to files: that table is owned by another module whose rows may be
+  // deleted independently — a missing file degrades to a placeholder part.
+  fileId    String @map("file_id") @db.Uuid
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, fileId])
+  @@map("message_files")
+}
+
+model File {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userSub   String   @map("user_sub")
+  name      String
+  mime      String
+  sizeBytes Int      @map("size_bytes")
+  objectKey String   @map("object_key")
+  iv        Bytes
+  authTag   Bytes    @map("auth_tag")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userSub, createdAt(sort: Desc)], map: "files_user_idx")
+  @@map("files")
+}
+
+model UserDek {
+  userSub    String   @id @map("user_sub")
+  wrappedDek String   @map("wrapped_dek")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("user_deks")
+}

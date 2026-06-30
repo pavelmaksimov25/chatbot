@@ -1,7 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
-import type { OnModuleInit } from '@nestjs/common';
-import type { Pool } from 'pg';
-import { PG_POOL } from '../db/db.module';
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface ProfileRecord {
   sub: string;
@@ -21,72 +20,59 @@ interface ProfileRow {
   updated_at: Date;
 }
 
-const RETURNING = 'sub, email, display_name, preferences, created_at, updated_at';
-
 @Injectable()
-export class ProfileRepository implements OnModuleInit {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+export class ProfileRepository {
+  constructor(private readonly prisma: PrismaService) {}
 
-  // Tracer-bullet migration: idempotent DDL on boot. Replace with a real
-  // migration runner once the schema stops being a single table.
-  async onModuleInit(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS user_profiles (
-        sub          text PRIMARY KEY,
-        email        text NOT NULL,
-        display_name text NOT NULL,
-        preferences  jsonb NOT NULL DEFAULT '{}',
-        created_at   timestamptz NOT NULL DEFAULT now(),
-        updated_at   timestamptz NOT NULL DEFAULT now()
-      )
-    `);
-  }
-
-  /** Get-or-create. Re-login refreshes the IdP email but never the chosen display name. */
+  /**
+   * Get-or-create. Re-login refreshes the IdP email but never the chosen
+   * display name — and only bumps updated_at when the email actually changed.
+   * That conditional upsert is Postgres-specific, so it stays raw SQL.
+   */
   async ensure(sub: string, email: string, displayName: string): Promise<ProfileRecord> {
-    const { rows } = await this.pool.query<ProfileRow>(
-      `INSERT INTO user_profiles (sub, email, display_name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (sub) DO UPDATE
-         SET email = EXCLUDED.email,
-             updated_at = CASE WHEN user_profiles.email IS DISTINCT FROM EXCLUDED.email
-                               THEN now() ELSE user_profiles.updated_at END
-       RETURNING ${RETURNING}`,
-      [sub, email, displayName],
-    );
-    return toRecord(rows[0]);
+    const rows = await this.prisma.$queryRaw<ProfileRow[]>`
+      INSERT INTO user_profiles (sub, email, display_name)
+      VALUES (${sub}, ${email}, ${displayName})
+      ON CONFLICT (sub) DO UPDATE
+        SET email = EXCLUDED.email,
+            updated_at = CASE WHEN user_profiles.email IS DISTINCT FROM EXCLUDED.email
+                              THEN now() ELSE user_profiles.updated_at END
+      RETURNING sub, email, display_name, preferences, created_at, updated_at`;
+    return fromRow(rows[0]);
   }
 
   async get(sub: string): Promise<ProfileRecord | null> {
-    const { rows } = await this.pool.query<ProfileRow>(
-      `SELECT ${RETURNING} FROM user_profiles WHERE sub = $1`,
-      [sub],
-    );
-    return rows[0] ? toRecord(rows[0]) : null;
+    const profile = await this.prisma.userProfile.findUnique({ where: { sub } });
+    return profile ? fromModel(profile) : null;
   }
 
   async update(
     sub: string,
     patch: { displayName?: string; preferences?: Record<string, unknown> },
   ): Promise<ProfileRecord | null> {
-    const { rows } = await this.pool.query<ProfileRow>(
-      `UPDATE user_profiles
-         SET display_name = COALESCE($2, display_name),
-             preferences  = COALESCE($3::jsonb, preferences),
-             updated_at   = now()
-       WHERE sub = $1
-       RETURNING ${RETURNING}`,
-      [
-        sub,
-        patch.displayName ?? null,
-        patch.preferences ? JSON.stringify(patch.preferences) : null,
-      ],
-    );
-    return rows[0] ? toRecord(rows[0]) : null;
+    try {
+      const profile = await this.prisma.userProfile.update({
+        where: { sub },
+        data: {
+          ...(patch.displayName !== undefined && { displayName: patch.displayName }),
+          ...(patch.preferences !== undefined && {
+            preferences: patch.preferences as Prisma.InputJsonValue,
+          }),
+          updatedAt: new Date(),
+        },
+      });
+      return fromModel(profile);
+    } catch (err) {
+      // P2025 = record to update not found — a missing sub is "not found".
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        return null;
+      }
+      throw err;
+    }
   }
 }
 
-function toRecord(row: ProfileRow): ProfileRecord {
+function fromRow(row: ProfileRow): ProfileRecord {
   return {
     sub: row.sub,
     email: row.email,
@@ -94,5 +80,23 @@ function toRecord(row: ProfileRow): ProfileRecord {
     preferences: row.preferences,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function fromModel(model: {
+  sub: string;
+  email: string;
+  displayName: string;
+  preferences: Prisma.JsonValue;
+  createdAt: Date;
+  updatedAt: Date;
+}): ProfileRecord {
+  return {
+    sub: model.sub,
+    email: model.email,
+    displayName: model.displayName,
+    preferences: (model.preferences ?? {}) as Record<string, unknown>,
+    createdAt: model.createdAt,
+    updatedAt: model.updatedAt,
   };
 }

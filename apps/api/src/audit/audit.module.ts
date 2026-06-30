@@ -1,6 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { DbModule } from '../db/db.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { AuditProcessor } from './audit.processor';
 import { AuditService, OUTPUT_AUDIT_QUEUE } from './audit.service';
 
@@ -20,7 +20,7 @@ import { AuditService, OUTPUT_AUDIT_QUEUE } from './audit.service';
       }),
     }),
     BullModule.registerQueue({ name: OUTPUT_AUDIT_QUEUE }),
-    DbModule,
+    PrismaModule,
   ],
   providers: [AuditService, AuditProcessor],
   exports: [AuditService],

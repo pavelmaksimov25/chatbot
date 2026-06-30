@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TerminusModule } from '@nestjs/terminus';
 import Redis from 'ioredis';
-import { DbModule } from '../db/db.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { HealthController } from './health.controller';
 import { VALKEY, StoreHealthService } from './store-health.service';
 
 @Module({
-  imports: [TerminusModule, DbModule],
+  imports: [TerminusModule, PrismaModule],
   controllers: [HealthController],
   providers: [
     {
