@@ -1,10 +1,8 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Inject } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 import { Counter, register } from 'prom-client';
-import type { Pool } from 'pg';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { auditText } from './audit-policy';
 import type { OutputAuditJob } from './audit.service';
 import { OUTPUT_AUDIT_QUEUE } from './audit.service';
@@ -21,7 +19,7 @@ export class AuditProcessor extends WorkerHost {
   ]);
 
   constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly prisma: PrismaService,
     private readonly logger: PinoLogger,
   ) {
     super();
@@ -30,22 +28,24 @@ export class AuditProcessor extends WorkerHost {
 
   async process(job: Job<OutputAuditJob>): Promise<{ flagged: boolean }> {
     const { messageId, conversationId } = job.data;
-    const { rows } = await this.pool.query<{ content: string }>(
-      'SELECT content FROM messages WHERE id = $1',
-      [messageId],
-    );
-    if (rows.length === 0) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { content: true },
+    });
+    if (!message) {
       // Conversation deleted before the audit ran — nothing left to audit.
       this.processed.inc({ outcome: 'gone' });
       return { flagged: false };
     }
 
-    const verdict = auditText(rows[0].content);
+    const verdict = auditText(message.content);
     if (verdict.flagged) {
-      await this.pool.query('UPDATE messages SET flagged = true, flag_reason = $2 WHERE id = $1', [
-        messageId,
-        verdict.reasons.join(','),
-      ]);
+      // updateMany (not update) so a row deleted between read and write is a
+      // no-op rather than a thrown P2025.
+      await this.prisma.message.updateMany({
+        where: { id: messageId },
+        data: { flagged: true, flagReason: verdict.reasons.join(',') },
+      });
       // THE audit log line — what an operator greps/alerts on.
       this.logger.warn(
         { conversationId, messageId, reasons: verdict.reasons },

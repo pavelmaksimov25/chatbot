@@ -1,23 +1,43 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { Pool } from 'pg';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { PrismaService } from '../prisma/prisma.service';
 import { ConversationRepository } from './conversation.repository';
 
 jest.setTimeout(120_000);
 
+// apps/api — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
+
 describe('ConversationRepository (postgres)', () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
+  let prisma: PrismaService;
   let repository: ConversationRepository;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine').start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
-    repository = new ConversationRepository(pool);
-    await repository.onModuleInit();
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: container.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    process.env.DB_HOST = container.getHost();
+    process.env.DB_PORT = String(container.getPort());
+    process.env.DB_USER = container.getUsername();
+    process.env.DB_PASSWORD = container.getPassword();
+    process.env.DB_NAME = container.getDatabase();
+    prisma = new PrismaService();
+    await prisma.$connect();
+    repository = new ConversationRepository(prisma);
   });
 
   afterAll(async () => {
+    await prisma?.$disconnect();
     await pool?.end();
     await container?.stop();
   });

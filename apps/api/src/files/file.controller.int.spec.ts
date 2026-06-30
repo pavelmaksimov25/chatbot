@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -8,7 +10,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { LoggerModule } from 'nestjs-pino';
 import { Client as MinioClient } from 'minio';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { FileController } from './file.controller';
 import { FileRepository } from './file.repository';
 import { FileService } from './file.service';
@@ -16,6 +18,10 @@ import { ObjectStoreService } from './object-store.service';
 import { VaultTransitService } from './vault-transit.service';
 
 jest.setTimeout(180_000);
+
+// apps/api — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
 
 /**
  * The security-critical path of the slice, against REAL stores: Vault Transit
@@ -61,6 +67,16 @@ describe('Encrypted file storage (integration)', () => {
     });
 
     pool = new Pool({ connectionString: postgres.getConnectionUri() });
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: postgres.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    process.env.DB_HOST = postgres.getHost();
+    process.env.DB_PORT = String(postgres.getPort());
+    process.env.DB_USER = postgres.getUsername();
+    process.env.DB_PASSWORD = postgres.getPassword();
+    process.env.DB_NAME = postgres.getDatabase();
     const moduleRef = await Test.createTestingModule({
       imports: [LoggerModule.forRoot({ pinoHttp: { level: 'silent' } })],
       controllers: [FileController],
@@ -69,12 +85,11 @@ describe('Encrypted file storage (integration)', () => {
         FileRepository,
         ObjectStoreService,
         VaultTransitService,
-        { provide: PG_POOL, useValue: pool },
+        { provide: PrismaService, useValue: new PrismaService() },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    await moduleRef.get(FileRepository).onModuleInit();
     await moduleRef.get(VaultTransitService).onModuleInit();
     await moduleRef.get(ObjectStoreService).onModuleInit();
 

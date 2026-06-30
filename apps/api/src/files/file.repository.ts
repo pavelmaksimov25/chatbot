@@ -1,7 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
-import type { OnModuleInit } from '@nestjs/common';
-import type { Pool } from 'pg';
-import { PG_POOL } from '../db/db.module';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface FileRecord {
   id: string;
@@ -15,126 +13,91 @@ export interface FileRecord {
   createdAt: Date;
 }
 
-interface FileRow {
-  id: string;
-  user_sub: string;
-  name: string;
-  mime: string;
-  size_bytes: number;
-  object_key: string;
-  iv: Buffer;
-  auth_tag: Buffer;
-  created_at: Date;
-}
-
-const COLUMNS = 'id, user_sub, name, mime, size_bytes, object_key, iv, auth_tag, created_at';
-
 @Injectable()
-export class FileRepository implements OnModuleInit {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS user_deks (
-        user_sub    text PRIMARY KEY,
-        wrapped_dek text NOT NULL,
-        created_at  timestamptz NOT NULL DEFAULT now(),
-        updated_at  timestamptz NOT NULL DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS files (
-        id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_sub    text NOT NULL,
-        name        text NOT NULL,
-        mime        text NOT NULL,
-        size_bytes  integer NOT NULL,
-        object_key  text NOT NULL,
-        iv          bytea NOT NULL,
-        auth_tag    bytea NOT NULL,
-        created_at  timestamptz NOT NULL DEFAULT now()
-      );
-      CREATE INDEX IF NOT EXISTS files_user_idx ON files (user_sub, created_at DESC);
-    `);
-  }
+export class FileRepository {
+  constructor(private readonly prisma: PrismaService) {}
 
   async getWrappedDek(userSub: string): Promise<string | null> {
-    const { rows } = await this.pool.query<{ wrapped_dek: string }>(
-      'SELECT wrapped_dek FROM user_deks WHERE user_sub = $1',
-      [userSub],
-    );
-    return rows[0]?.wrapped_dek ?? null;
+    const dek = await this.prisma.userDek.findUnique({ where: { userSub } });
+    return dek?.wrappedDek ?? null;
   }
 
   /** First-writer wins under concurrency; returns the winning wrapped DEK. */
   async saveWrappedDek(userSub: string, wrapped: string): Promise<string> {
-    const { rows } = await this.pool.query<{ wrapped_dek: string }>(
-      `INSERT INTO user_deks (user_sub, wrapped_dek) VALUES ($1, $2)
-       ON CONFLICT (user_sub) DO UPDATE SET user_sub = EXCLUDED.user_sub
-       RETURNING wrapped_dek`,
-      [userSub, wrapped],
-    );
-    return rows[0].wrapped_dek;
+    // Empty update = on conflict keep the existing DEK (first writer wins).
+    const dek = await this.prisma.userDek.upsert({
+      where: { userSub },
+      create: { userSub, wrappedDek: wrapped },
+      update: {},
+    });
+    return dek.wrappedDek;
   }
 
   async listWrappedDeks(): Promise<{ userSub: string; wrapped: string }[]> {
-    const { rows } = await this.pool.query<{ user_sub: string; wrapped_dek: string }>(
-      'SELECT user_sub, wrapped_dek FROM user_deks',
-    );
-    return rows.map((r) => ({ userSub: r.user_sub, wrapped: r.wrapped_dek }));
+    const deks = await this.prisma.userDek.findMany();
+    return deks.map((dek) => ({ userSub: dek.userSub, wrapped: dek.wrappedDek }));
   }
 
   async updateWrappedDek(userSub: string, wrapped: string): Promise<void> {
-    await this.pool.query(
-      'UPDATE user_deks SET wrapped_dek = $2, updated_at = now() WHERE user_sub = $1',
-      [userSub, wrapped],
-    );
+    await this.prisma.userDek.updateMany({
+      where: { userSub },
+      data: { wrappedDek: wrapped, updatedAt: new Date() },
+    });
   }
 
   async insertFile(record: Omit<FileRecord, 'id' | 'createdAt'>): Promise<FileRecord> {
-    const { rows } = await this.pool.query<FileRow>(
-      `INSERT INTO files (user_sub, name, mime, size_bytes, object_key, iv, auth_tag)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING ${COLUMNS}`,
-      [
-        record.userSub,
-        record.name,
-        record.mime,
-        record.sizeBytes,
-        record.objectKey,
-        record.iv,
-        record.authTag,
-      ],
-    );
-    return toRecord(rows[0]);
+    const file = await this.prisma.file.create({
+      data: {
+        userSub: record.userSub,
+        name: record.name,
+        mime: record.mime,
+        sizeBytes: record.sizeBytes,
+        objectKey: record.objectKey,
+        // Copy into a fresh Uint8Array — Prisma's Bytes input is
+        // Uint8Array<ArrayBuffer>, while Node Buffer is Uint8Array<ArrayBufferLike>.
+        iv: Uint8Array.from(record.iv),
+        authTag: Uint8Array.from(record.authTag),
+      },
+    });
+    return toRecord(file);
   }
 
   /** Ownership is part of the lookup — a foreign file is "not found". */
   async getFile(id: string, userSub: string): Promise<FileRecord | null> {
-    const { rows } = await this.pool.query<FileRow>(
-      `SELECT ${COLUMNS} FROM files WHERE id = $1 AND user_sub = $2`,
-      [id, userSub],
-    );
-    return rows[0] ? toRecord(rows[0]) : null;
+    const file = await this.prisma.file.findFirst({ where: { id, userSub } });
+    return file ? toRecord(file) : null;
   }
 
   async listFiles(userSub: string): Promise<FileRecord[]> {
-    const { rows } = await this.pool.query<FileRow>(
-      `SELECT ${COLUMNS} FROM files WHERE user_sub = $1 ORDER BY created_at DESC`,
-      [userSub],
-    );
-    return rows.map(toRecord);
+    const files = await this.prisma.file.findMany({
+      where: { userSub },
+      orderBy: { createdAt: 'desc' },
+    });
+    return files.map(toRecord);
   }
 }
 
-function toRecord(row: FileRow): FileRecord {
+function toRecord(file: {
+  id: string;
+  userSub: string;
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  objectKey: string;
+  iv: Uint8Array;
+  authTag: Uint8Array;
+  createdAt: Date;
+}): FileRecord {
   return {
-    id: row.id,
-    userSub: row.user_sub,
-    name: row.name,
-    mime: row.mime,
-    sizeBytes: row.size_bytes,
-    objectKey: row.object_key,
-    iv: row.iv,
-    authTag: row.auth_tag,
-    createdAt: row.created_at,
+    id: file.id,
+    userSub: file.userSub,
+    name: file.name,
+    mime: file.mime,
+    sizeBytes: file.sizeBytes,
+    objectKey: file.objectKey,
+    // Prisma returns Bytes as Uint8Array; callers expect Node Buffers.
+    iv: Buffer.from(file.iv),
+    authTag: Buffer.from(file.authTag),
+    createdAt: file.createdAt,
   };
 }

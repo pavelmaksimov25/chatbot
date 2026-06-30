@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Pool } from 'pg';
@@ -7,7 +9,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { LoggerModule } from 'nestjs-pino';
 import { BullModule } from '@nestjs/bullmq';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import { FakeLlmAdapter } from '../llm/fake.adapter';
 import { ConversationRepository } from '../chat/conversation.repository';
@@ -15,6 +17,10 @@ import { PostTurnProcessor } from './post-turn.processor';
 import { PostTurnService, POST_TURN_QUEUE } from './post-turn.service';
 
 jest.setTimeout(180_000);
+
+// apps/api — where prisma.config.ts + prisma/ live.
+const PKG_ROOT = join(__dirname, '..', '..');
+const PRISMA_BIN = join(PKG_ROOT, 'node_modules', '.bin', 'prisma');
 
 async function until(check: () => Promise<boolean>, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -43,6 +49,16 @@ describe('Post-turn jobs (integration)', () => {
       new PostgreSqlContainer('postgres:17-alpine').start(),
     ]);
     pool = new Pool({ connectionString: postgres.getConnectionUri() });
+    execFileSync(PRISMA_BIN, ['migrate', 'deploy'], {
+      cwd: PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: postgres.getConnectionUri() },
+      stdio: 'inherit',
+    });
+    process.env.DB_HOST = postgres.getHost();
+    process.env.DB_PORT = String(postgres.getPort());
+    process.env.DB_USER = postgres.getUsername();
+    process.env.DB_PASSWORD = postgres.getPassword();
+    process.env.DB_NAME = postgres.getDatabase();
     llm = new FakeLlmAdapter([]);
 
     const moduleRef = await Test.createTestingModule({
@@ -61,14 +77,13 @@ describe('Post-turn jobs (integration)', () => {
         PostTurnService,
         PostTurnProcessor,
         ConversationRepository,
-        { provide: PG_POOL, useValue: pool },
+        { provide: PrismaService, useValue: new PrismaService() },
         { provide: LLM_ADAPTER, useValue: llm },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
     repository = moduleRef.get(ConversationRepository);
-    await repository.onModuleInit();
     service = moduleRef.get(PostTurnService);
   });
 

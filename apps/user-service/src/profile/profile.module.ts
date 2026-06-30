@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { DbModule } from '../db/db.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { ProfileGrpcController } from './profile-grpc.controller';
 import { ProfileRepository } from './profile.repository';
 
 @Module({
-  imports: [DbModule],
+  imports: [PrismaModule],
   controllers: [ProfileGrpcController],
   providers: [ProfileRepository],
 })

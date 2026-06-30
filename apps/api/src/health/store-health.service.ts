@@ -1,26 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { HealthIndicatorService } from '@nestjs/terminus';
 import type { HealthIndicatorResult } from '@nestjs/terminus';
-import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { VALKEY } from '../cache/cache.module';
-import { PG_POOL } from '../db/db.module';
+import { PrismaService } from '../prisma/prisma.service';
 
-export { PG_POOL, VALKEY };
+export { VALKEY };
 
 const PROBE_TIMEOUT_MS = 2000;
 
 @Injectable()
 export class StoreHealthService {
   constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly prisma: PrismaService,
     @Inject(VALKEY) private readonly valkeyClient: Redis,
     private readonly indicator: HealthIndicatorService,
   ) {}
 
   postgres(): Promise<HealthIndicatorResult> {
     return this.probe('postgres', async () => {
-      await this.pool.query('SELECT 1');
+      await this.prisma.$queryRaw`SELECT 1`;
     });
   }
 

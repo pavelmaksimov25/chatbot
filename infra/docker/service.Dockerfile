@@ -14,7 +14,11 @@ COPY apps/spa/package.json apps/spa/
 RUN pnpm install --frozen-lockfile --filter "@chatbot/${SERVICE}"
 
 COPY apps/${SERVICE} apps/${SERVICE}
-RUN pnpm --filter "@chatbot/${SERVICE}" build \
+# Regenerate the Prisma client from the schema so the image is authoritative,
+# not dependent on the committed copy being current. No-op for services without
+# a db:generate script (bff-gateway, spa).
+RUN pnpm --filter "@chatbot/${SERVICE}" run --if-present db:generate \
+  && pnpm --filter "@chatbot/${SERVICE}" build \
   && pnpm --filter "@chatbot/${SERVICE}" deploy --prod --legacy /out
 
 FROM node:22-alpine

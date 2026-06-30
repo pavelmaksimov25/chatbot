@@ -18,6 +18,32 @@ spec:
         app.kubernetes.io/name: {{ $name }}
         {{- include "chatbot.labels" $ | nindent 8 }}
     spec:
+      {{- if $svc.db }}
+      # Run schema migrations before the app starts. Same image, so the CLI,
+      # prisma/ schema + migrations all ship together. DATABASE_URL is composed
+      # from these DB_* parts inside prisma.config.ts (password URL-encoded there).
+      initContainers:
+        - name: migrate
+          image: "{{ $.Values.image.repositoryPrefix }}/{{ $name }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+          env:
+            - name: DB_HOST
+              value: {{ $.Release.Name }}-postgres
+            - name: DB_PORT
+              value: '5432'
+            - name: DB_USER
+              value: {{ $svc.db.user }}
+            - name: DB_NAME
+              value: {{ $svc.db.name }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chatbot-postgres
+                  key: {{ $svc.db.passwordKey }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: "{{ $.Values.image.repositoryPrefix }}/{{ $name }}:{{ $.Values.image.tag }}"
