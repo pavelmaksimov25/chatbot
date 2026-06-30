@@ -388,6 +388,7 @@ export const ModelName = {
   Message: 'Message',
   MessageFile: 'MessageFile',
   File: 'File',
+  Export: 'Export',
   UserDek: 'UserDek'
 } as const
 
@@ -404,7 +405,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "conversation" | "message" | "messageFile" | "file" | "userDek"
+    modelProps: "conversation" | "message" | "messageFile" | "file" | "export" | "userDek"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -704,6 +705,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    Export: {
+      payload: Prisma.$ExportPayload<ExtArgs>
+      fields: Prisma.ExportFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ExportFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ExportFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        findFirst: {
+          args: Prisma.ExportFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ExportFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        findMany: {
+          args: Prisma.ExportFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>[]
+        }
+        create: {
+          args: Prisma.ExportCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        createMany: {
+          args: Prisma.ExportCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.ExportCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>[]
+        }
+        delete: {
+          args: Prisma.ExportDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        update: {
+          args: Prisma.ExportUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        deleteMany: {
+          args: Prisma.ExportDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ExportUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.ExportUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>[]
+        }
+        upsert: {
+          args: Prisma.ExportUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ExportPayload>
+        }
+        aggregate: {
+          args: Prisma.ExportAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateExport>
+        }
+        groupBy: {
+          args: Prisma.ExportGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ExportGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ExportCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ExportCountAggregateOutputType> | number
+        }
+      }
+    }
     UserDek: {
       payload: Prisma.$UserDekPayload<ExtArgs>
       fields: Prisma.UserDekFieldRefs
@@ -869,6 +944,22 @@ export const FileScalarFieldEnum = {
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
 
 
+export const ExportScalarFieldEnum = {
+  id: 'id',
+  userSub: 'userSub',
+  conversationId: 'conversationId',
+  messageId: 'messageId',
+  format: 'format',
+  status: 'status',
+  fileId: 'fileId',
+  error: 'error',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type ExportScalarFieldEnum = (typeof ExportScalarFieldEnum)[keyof typeof ExportScalarFieldEnum]
+
+
 export const UserDekScalarFieldEnum = {
   userSub: 'userSub',
   wrappedDek: 'wrappedDek',
@@ -983,6 +1074,34 @@ export type BytesFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, '
  * Reference to a field of type 'Bytes[]'
  */
 export type ListBytesFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Bytes[]'>
+    
+
+
+/**
+ * Reference to a field of type 'ExportFormat'
+ */
+export type EnumExportFormatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ExportFormat'>
+    
+
+
+/**
+ * Reference to a field of type 'ExportFormat[]'
+ */
+export type ListEnumExportFormatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ExportFormat[]'>
+    
+
+
+/**
+ * Reference to a field of type 'ExportStatus'
+ */
+export type EnumExportStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ExportStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'ExportStatus[]'
+ */
+export type ListEnumExportStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ExportStatus[]'>
     
 
 
@@ -1113,6 +1232,7 @@ export type GlobalOmitConfig = {
   message?: Prisma.MessageOmit
   messageFile?: Prisma.MessageFileOmit
   file?: Prisma.FileOmit
+  export?: Prisma.ExportOmit
   userDek?: Prisma.UserDekOmit
 }
 

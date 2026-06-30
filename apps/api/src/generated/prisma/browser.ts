@@ -38,6 +38,11 @@ export type MessageFile = Prisma.MessageFileModel
  */
 export type File = Prisma.FileModel
 /**
+ * Model Export
+ * 
+ */
+export type Export = Prisma.ExportModel
+/**
  * Model UserDek
  * 
  */

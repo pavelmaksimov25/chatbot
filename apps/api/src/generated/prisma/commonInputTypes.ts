@@ -238,6 +238,40 @@ export type BytesWithAggregatesFilter<$PrismaModel = never> = {
   _max?: Prisma.NestedBytesFilter<$PrismaModel>
 }
 
+export type EnumExportFormatFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportFormat | Prisma.EnumExportFormatFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportFormatFilter<$PrismaModel> | $Enums.ExportFormat
+}
+
+export type EnumExportStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportStatus | Prisma.EnumExportStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportStatusFilter<$PrismaModel> | $Enums.ExportStatus
+}
+
+export type EnumExportFormatWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportFormat | Prisma.EnumExportFormatFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportFormatWithAggregatesFilter<$PrismaModel> | $Enums.ExportFormat
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumExportFormatFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumExportFormatFilter<$PrismaModel>
+}
+
+export type EnumExportStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportStatus | Prisma.EnumExportStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportStatusWithAggregatesFilter<$PrismaModel> | $Enums.ExportStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumExportStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumExportStatusFilter<$PrismaModel>
+}
+
 export type NestedUuidFilter<$PrismaModel = never> = {
   equals?: string | Prisma.StringFieldRefInput<$PrismaModel>
   in?: string[] | Prisma.ListStringFieldRefInput<$PrismaModel>
@@ -469,6 +503,40 @@ export type NestedBytesWithAggregatesFilter<$PrismaModel = never> = {
   _count?: Prisma.NestedIntFilter<$PrismaModel>
   _min?: Prisma.NestedBytesFilter<$PrismaModel>
   _max?: Prisma.NestedBytesFilter<$PrismaModel>
+}
+
+export type NestedEnumExportFormatFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportFormat | Prisma.EnumExportFormatFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportFormatFilter<$PrismaModel> | $Enums.ExportFormat
+}
+
+export type NestedEnumExportStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportStatus | Prisma.EnumExportStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportStatusFilter<$PrismaModel> | $Enums.ExportStatus
+}
+
+export type NestedEnumExportFormatWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportFormat | Prisma.EnumExportFormatFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportFormat[] | Prisma.ListEnumExportFormatFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportFormatWithAggregatesFilter<$PrismaModel> | $Enums.ExportFormat
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumExportFormatFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumExportFormatFilter<$PrismaModel>
+}
+
+export type NestedEnumExportStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.ExportStatus | Prisma.EnumExportStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.ExportStatus[] | Prisma.ListEnumExportStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumExportStatusWithAggregatesFilter<$PrismaModel> | $Enums.ExportStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumExportStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumExportStatusFilter<$PrismaModel>
 }
 
 

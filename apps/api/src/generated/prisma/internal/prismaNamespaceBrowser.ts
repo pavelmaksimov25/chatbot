@@ -55,6 +55,7 @@ export const ModelName = {
   Message: 'Message',
   MessageFile: 'MessageFile',
   File: 'File',
+  Export: 'Export',
   UserDek: 'UserDek'
 } as const
 
@@ -124,6 +125,22 @@ export const FileScalarFieldEnum = {
 } as const
 
 export type FileScalarFieldEnum = (typeof FileScalarFieldEnum)[keyof typeof FileScalarFieldEnum]
+
+
+export const ExportScalarFieldEnum = {
+  id: 'id',
+  userSub: 'userSub',
+  conversationId: 'conversationId',
+  messageId: 'messageId',
+  format: 'format',
+  status: 'status',
+  fileId: 'fileId',
+  error: 'error',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type ExportScalarFieldEnum = (typeof ExportScalarFieldEnum)[keyof typeof ExportScalarFieldEnum]
 
 
 export const UserDekScalarFieldEnum = {
