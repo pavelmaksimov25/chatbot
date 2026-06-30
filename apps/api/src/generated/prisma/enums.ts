@@ -15,3 +15,21 @@ export const MessageRole = {
 } as const
 
 export type MessageRole = (typeof MessageRole)[keyof typeof MessageRole]
+
+
+export const ExportFormat = {
+  docx: 'docx',
+  pdf: 'pdf',
+  csv: 'csv'
+} as const
+
+export type ExportFormat = (typeof ExportFormat)[keyof typeof ExportFormat]
+
+
+export const ExportStatus = {
+  pending: 'pending',
+  ready: 'ready',
+  failed: 'failed'
+} as const
+
+export type ExportStatus = (typeof ExportStatus)[keyof typeof ExportStatus]

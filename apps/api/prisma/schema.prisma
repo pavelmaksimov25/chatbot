@@ -17,6 +17,18 @@ enum MessageRole {
   assistant
 }
 
+enum ExportFormat {
+  docx
+  pdf
+  csv
+}
+
+enum ExportStatus {
+  pending
+  ready
+  failed
+}
+
 model Conversation {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userSub        String    @map("user_sub")
@@ -80,6 +92,25 @@ model File {
 
   @@index([userSub, createdAt(sort: Desc)], map: "files_user_idx")
   @@map("files")
+}
+
+model Export {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userSub        String       @map("user_sub")
+  conversationId String       @map("conversation_id") @db.Uuid
+  // Nullable, no FK: a single-message export still stands if the message is
+  // later deleted (mirrors message_files — exports outlive their source row).
+  messageId      String?      @map("message_id") @db.Uuid
+  format         ExportFormat
+  status         ExportStatus @default(pending)
+  // Set when status flips to ready; points at the encrypted files row.
+  fileId         String?      @map("file_id") @db.Uuid
+  error          String?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userSub, createdAt(sort: Desc)], map: "exports_user_idx")
+  @@map("exports")
 }
 
 model UserDek {

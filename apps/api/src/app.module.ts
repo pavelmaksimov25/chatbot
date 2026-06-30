@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import { ChatModule } from './chat/chat.module';
+import { ExportsModule } from './exports/exports.module';
 import { FileModule } from './files/file.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -18,6 +19,7 @@ import { ProfileModule } from './profile/profile.module';
       },
     }),
     ChatModule,
+    ExportsModule,
     FileModule,
     HealthModule,
     MetricsModule,
