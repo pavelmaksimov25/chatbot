@@ -28,6 +28,8 @@ spec:
           env:
             - name: COLLECTOR_OTLP_ENABLED
               value: 'true'
+            - name: MEMORY_MAX_TRACES
+              value: {{ .Values.observability.jaeger.maxTraces | quote }}
           ports:
             - name: otlp-http
               containerPort: 4318

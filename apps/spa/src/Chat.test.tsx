@@ -29,6 +29,7 @@ interface StubOptions {
   welcomeFrames?: string[];
   list?: { id: string; title: string | null; preview: string | null }[];
   history?: Record<string, { id?: string; role: string; content: string }[]>;
+  suggestions?: { forMessageId: string | null; suggestions: string[] };
 }
 
 function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
@@ -37,6 +38,7 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
     welcomeFrames = ['event: done\ndata: {"assistantMessageId":"w1"}\n\n'],
     list = [],
     history = {},
+    suggestions = { forMessageId: null, suggestions: [] },
   } = options;
   const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -55,6 +57,9 @@ function stubChatFetch(options: StubOptions = {}): ReturnType<typeof vi.fn> {
     }
     if (url === '/files' && method === 'POST') {
       return Promise.resolve(Response.json({ id: 'file-9', name: 'shot.png' }, { status: 201 }));
+    }
+    if (/\/suggestions$/.test(url)) {
+      return Promise.resolve(Response.json(suggestions));
     }
     const messages = /^\/conversations\/([^/]+)\/messages(?:\/[^/]+\/edit)?$/.exec(url);
     if (messages && method === 'POST') {
@@ -180,6 +185,34 @@ describe('Chat', () => {
     // The chip stays on the sent message; the pending slot is cleared.
     expect(screen.getByText(/📎 shot\.png/)).toBeDefined();
   });
+
+  it('fades in suggestion chips after the answer and sends one on click', async () => {
+    const mock = resumedStub({
+      frames: [
+        'event: chunk\ndata: {"text":"Caching works like this."}\n\n',
+        'event: done\ndata: {"userMessageId":"u1","assistantMessageId":"a1"}\n\n',
+      ],
+      suggestions: { forMessageId: 'a1', suggestions: ['What about eviction?'] },
+    });
+    render(<Chat csrfToken="token" />);
+
+    await sendMessage('how does caching work?');
+    expect(await screen.findByText('Caching works like this.')).toBeDefined();
+
+    // Chips arrive a beat later (first poll fires after 1.5s) — correct UX.
+    const chip = await screen.findByRole(
+      'button',
+      { name: 'What about eviction?' },
+      { timeout: 5000 },
+    );
+    fireEvent.click(chip);
+    await screen.findByRole('button', { name: 'Send' });
+
+    const sends = mock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith('/messages') && init?.method === 'POST',
+    );
+    expect(JSON.parse(sends.at(-1)![1]!.body as string).content).toBe('What about eviction?');
+  }, 15_000);
 
   it('streams a fresh greeting when New chat is clicked', async () => {
     const mock = resumedStub({

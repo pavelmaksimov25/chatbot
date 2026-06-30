@@ -5,6 +5,55 @@ first. Architecture-level decisions predating this file live in the README
 ("Key design decisions"). Each entry says what was decided, why, and what was
 rejected — so any of it can be revisited with context instead of archaeology.
 
+## Slice 17 — Suggestion chips + conversation titles
+
+- **Both jobs ride the slice-16 BullMQ infra on a second queue (`post-turn`),
+  not the audit queue.** Same fire-and-forget contract: a chips/title failure
+  can never delay or fail a turn that already streamed. They are enqueued
+  together right after the assistant message persists, from the same point in
+  the turn the audit job is. Rejected: one shared queue with a `kind` field —
+  separate queues keep retry/visibility per job type and let a future worker
+  deployment scale them independently.
+- **Cheap tier (`tier: 'cheap'` → Haiku-class) for both.** Chips and titles
+  are exactly the "light classification" the tier map reserves Haiku for; the
+  chat hot path keeps Sonnet. The processor passes the tier through the same
+  adapter seam, so the provider fallback still maps cheap→cheap and never
+  silently upgrades cost.
+- **The LLM stack moved behind one `LlmModule` exported token**, shared by
+  chat and the post-turn worker, instead of being re-declared per consumer.
+  Previously the provider wiring (registry, three providers, fallback,
+  admission) lived inline in `ChatModule`; a second consumer would have meant
+  copy-pasting it. ChatModule and PostTurnModule reference each other
+  (`forwardRef`) — chat enqueues, the worker reads the repository chat owns.
+- **Title write is `SET title WHERE title IS NULL` — first generated title
+  wins and a user-chosen title is NEVER overwritten.** The decision lives in
+  the SQL, not the producer, so a duplicate/retried job is idempotent by
+  construction. Enqueueing stays dumb (always queues a title job); the
+  processor short-circuits an already-titled conversation.
+- **Chips are stored ON the conversation row (`suggestions text[]`,
+  `suggestions_for uuid`), not a side table, and only the LATEST answer's
+  chips are kept.** `suggestions_for` pins them to one assistant message so
+  the SPA can tell whether the chips it polled match the turn it just saw;
+  a newer turn overwrites them wholesale. Rejected: per-message chip history
+  (nothing reads stale chips — once you send a follow-up the old suggestions
+  are moot).
+- **Parsing is defensive on both sides because cheap models decorate
+  output.** `parseChips` extracts the first `[...]` out of prose/code-fences,
+  drops non-string/oversized entries, clamps to 3; `sanitizeTitle` strips
+  quotes/markdown/trailing punctuation and clamps to 60 chars. An unparseable
+  result THROWS so the BullMQ retry (×3) takes another nondeterministic shot
+  rather than persisting garbage; empty-after-sanitize is treated the same.
+- **The SPA POLLS for chips (5×, 1.5s apart) instead of opening a second
+  stream.** Chips land a beat after the answer; a short bounded poll on the
+  existing `GET …/suggestions` route is far simpler than a websocket/SSE
+  side-channel for a best-effort nicety, and it gives up quietly if the user
+  navigates away (guarded on `activeRef`). A successful poll also refreshes
+  the sidebar, since the async title has usually landed by then.
+- **A clicked chip is just `send(chipText)`** — it reuses the normal send
+  path (same streaming, same persistence, same input-safety), so there is no
+  second code path to keep correct. Chips clear on every new turn, edit, and
+  conversation switch.
+
 ## Slice 16 — BullMQ infra + async output audit
 
 - **Enqueueing is fire-and-forget BY CONTRACT.** The producer catches and

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { PostTurnService } from '../post-turn/post-turn.service';
 import { FileService } from '../files/file.service';
 import { LLM_ADAPTER } from '../llm/llm-adapter';
 import type { ChatTurnMessage, ContentPart, LlmAdapter } from '../llm/llm-adapter';
@@ -50,6 +51,7 @@ export class ChatService {
     private readonly profiles: ProfileService,
     private readonly files: FileService,
     private readonly audit: AuditService,
+    private readonly postTurn: PostTurnService,
   ) {}
 
   createConversation(userSub: string): Promise<Conversation> {
@@ -65,6 +67,17 @@ export class ChatService {
     if (!deleted) {
       throw new NotFoundException('conversation not found');
     }
+  }
+
+  async getSuggestions(
+    userSub: string,
+    conversationId: string,
+  ): Promise<{ forMessageId: string | null; suggestions: string[] }> {
+    const result = await this.conversations.getSuggestions(conversationId, userSub);
+    if (!result) {
+      throw new NotFoundException('conversation not found');
+    }
+    return result;
   }
 
   async listMessages(userSub: string, conversationId: string): Promise<MessageRecord[]> {
@@ -185,6 +198,11 @@ export class ChatService {
     this.audit.enqueueOutputAudit({
       conversationId,
       messageId: assistantMessage.id,
+      userSub,
+    });
+    this.postTurn.enqueuePostTurn({
+      conversationId,
+      assistantMessageId: assistantMessage.id,
       userSub,
     });
     yield {

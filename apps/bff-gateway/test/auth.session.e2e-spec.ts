@@ -332,6 +332,16 @@ describe('Auth0 BFF session (integration)', () => {
       ]);
     });
 
+    it('fetches suggestion chips through the proxy', async () => {
+      const agent = request.agent(app.getHttpServer());
+      await login(agent);
+      const res = await agent.get('/conversations/conv-1/suggestions').expect(200);
+      expect(res.body).toEqual({
+        forMessageId: 'm2',
+        suggestions: ['Tell me more?', 'Show an example?'],
+      });
+    });
+
     it('lists conversations through the proxy', async () => {
       const agent = request.agent(app.getHttpServer());
       await login(agent);

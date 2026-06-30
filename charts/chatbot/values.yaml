@@ -115,6 +115,9 @@ observability:
   otlpEndpoint: 'http://{{ .Release.Name }}-jaeger:4318'
   jaeger:
     image: jaegertracing/all-in-one:1.60
+    # All-in-one keeps spans in memory; uncapped it grows into the limit below
+    # and OOMs, wedging the readiness probe. Bound the ring buffer instead.
+    maxTraces: 20000
     resources:
       requests:
         cpu: 50m
