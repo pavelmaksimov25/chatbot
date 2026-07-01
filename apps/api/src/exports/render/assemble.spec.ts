@@ -1,9 +1,9 @@
-import { assemble } from './assemble';
+import { assemble, ExportScope } from './assemble';
 
 describe('assemble', () => {
   it('flattens a whole conversation into ordered rows, preserving order', () => {
     const doc = assemble({
-      scope: 'conversation',
+      scope: ExportScope.Conversation,
       title: 'Trip planning',
       messages: [
         { role: 'user', content: 'Where to in June?' },
@@ -21,7 +21,7 @@ describe('assemble', () => {
 
   it('reduces a single assistant answer to one row', () => {
     const doc = assemble({
-      scope: 'answer',
+      scope: ExportScope.Answer,
       title: 'Trip planning',
       message: { role: 'assistant', content: 'Consider Lisbon.' },
     });
@@ -29,18 +29,21 @@ describe('assemble', () => {
   });
 
   it('falls back to a scope-appropriate title when none is given', () => {
-    expect(assemble({ scope: 'conversation', title: null, messages: [] }).title).toBe(
+    expect(assemble({ scope: ExportScope.Conversation, title: null, messages: [] }).title).toBe(
       'Conversation',
     );
     expect(
-      assemble({ scope: 'answer', title: '   ', message: { role: 'assistant', content: 'x' } })
-        .title,
+      assemble({
+        scope: ExportScope.Answer,
+        title: '   ',
+        message: { role: 'assistant', content: 'x' },
+      }).title,
     ).toBe('Answer');
   });
 
   it('keeps a provided title trimmed', () => {
     expect(
-      assemble({ scope: 'conversation', title: '  Budget  ', messages: [] }).title,
+      assemble({ scope: ExportScope.Conversation, title: '  Budget  ', messages: [] }).title,
     ).toBe('Budget');
   });
 });

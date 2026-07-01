@@ -18,9 +18,19 @@ export interface SourceMessage {
   content: string;
 }
 
+/**
+ * The two shapes an export can be built from. Single source of truth for the
+ * discriminant — reference these instead of the raw string literals.
+ */
+export const ExportScope = {
+  Conversation: 'conversation',
+  Answer: 'answer',
+} as const;
+export type ExportScope = (typeof ExportScope)[keyof typeof ExportScope];
+
 export type AssembleInput =
-  | { scope: 'conversation'; title: string | null; messages: SourceMessage[] }
-  | { scope: 'answer'; title: string | null; message: SourceMessage };
+  | { scope: typeof ExportScope.Conversation; title: string | null; messages: SourceMessage[] }
+  | { scope: typeof ExportScope.Answer; title: string | null; message: SourceMessage };
 
 const DEFAULT_CONVERSATION_TITLE = 'Conversation';
 const DEFAULT_ANSWER_TITLE = 'Answer';
@@ -32,7 +42,7 @@ const DEFAULT_ANSWER_TITLE = 'Answer';
  * filename.
  */
 export function assemble(input: AssembleInput): ExportDocument {
-  if (input.scope === 'answer') {
+  if (input.scope === ExportScope.Answer) {
     return {
       title: cleanTitle(input.title, DEFAULT_ANSWER_TITLE),
       rows: [{ role: input.message.role, content: input.message.content }],

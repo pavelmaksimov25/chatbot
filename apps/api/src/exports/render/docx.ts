@@ -3,8 +3,7 @@ import type { ExportDocument, ExportMessage } from './assemble';
 import { roleLabel, slugify } from './shared';
 import type { RenderedExport } from './shared';
 
-export const DOCX_MIME =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /**
  * Render the export model to a .docx: the title as Heading 1, then each turn

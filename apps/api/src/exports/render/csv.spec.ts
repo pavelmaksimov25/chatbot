@@ -1,11 +1,11 @@
-import { assemble } from './assemble';
+import { assemble, ExportScope } from './assemble';
 import { CSV_MIME, renderCsv } from './csv';
 
 describe('renderCsv', () => {
   it('emits a role,content header and CRLF line endings with the right mime/extension', async () => {
     const out = await renderCsv(
       assemble({
-        scope: 'conversation',
+        scope: ExportScope.Conversation,
         title: 'Notes',
         messages: [
           { role: 'user', content: 'hi' },
@@ -22,7 +22,7 @@ describe('renderCsv', () => {
   it('quotes and escapes fields with quotes, commas, and newlines (RFC 4180)', async () => {
     const out = await renderCsv(
       assemble({
-        scope: 'answer',
+        scope: ExportScope.Answer,
         title: 'Edge',
         message: {
           role: 'assistant',
@@ -39,7 +39,7 @@ describe('renderCsv', () => {
   it('quotes a field containing a carriage return', async () => {
     const out = await renderCsv(
       assemble({
-        scope: 'answer',
+        scope: ExportScope.Answer,
         title: 'CR',
         message: { role: 'assistant', content: 'line1\r\nline2' },
       }),
@@ -50,7 +50,7 @@ describe('renderCsv', () => {
   it('leaves plain fields unquoted', async () => {
     const out = await renderCsv(
       assemble({
-        scope: 'answer',
+        scope: ExportScope.Answer,
         title: 'Plain',
         message: { role: 'user', content: 'simple text' },
       }),

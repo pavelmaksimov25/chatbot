@@ -1,11 +1,11 @@
-import { assemble } from './assemble';
+import { assemble, ExportScope } from './assemble';
 import { DOCX_MIME, renderDocx } from './docx';
 
 describe('renderDocx', () => {
   it('produces a non-empty .docx (zip) buffer with the right mime/extension', async () => {
     const out = await renderDocx(
       assemble({
-        scope: 'conversation',
+        scope: ExportScope.Conversation,
         title: 'My Report',
         messages: [
           { role: 'user', content: 'Summarise the meeting.' },
@@ -23,7 +23,7 @@ describe('renderDocx', () => {
   it('renders a single answer to a valid document', async () => {
     const out = await renderDocx(
       assemble({
-        scope: 'answer',
+        scope: ExportScope.Answer,
         title: null,
         message: { role: 'assistant', content: 'Just one answer.' },
       }),

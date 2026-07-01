@@ -1,11 +1,11 @@
-import { assemble } from './assemble';
+import { assemble, ExportScope } from './assemble';
 import { PDF_MIME, renderPdf } from './pdf';
 
 describe('renderPdf', () => {
   it('produces a non-empty PDF buffer with the right mime/extension', async () => {
     const out = await renderPdf(
       assemble({
-        scope: 'conversation',
+        scope: ExportScope.Conversation,
         title: 'Quarterly Review',
         messages: [
           { role: 'user', content: 'How did we do?' },
@@ -27,7 +27,7 @@ describe('renderPdf', () => {
     );
     const out = await renderPdf(
       assemble({
-        scope: 'answer',
+        scope: ExportScope.Answer,
         title: null,
         message: { role: 'assistant', content: long },
       }),

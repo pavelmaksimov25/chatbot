@@ -6,7 +6,7 @@ import { renderPdf } from './pdf';
 import type { RenderedExport } from './shared';
 
 export type { ExportDocument, ExportMessage, AssembleInput, SourceMessage } from './assemble';
-export { assemble } from './assemble';
+export { assemble, ExportScope } from './assemble';
 export type { RenderedExport } from './shared';
 export { renderCsv, CSV_MIME } from './csv';
 export { renderDocx, DOCX_MIME } from './docx';
