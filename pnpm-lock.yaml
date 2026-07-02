@@ -287,8 +287,8 @@ importers:
         specifier: ^30.4.2
         version: 30.4.2(@types/node@25.9.3)
       oauth2-mock-server:
-        specifier: ^8.2.3
-        version: 8.2.3
+        specifier: ^9.1.0
+        version: 9.1.0
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -4393,9 +4393,9 @@ packages:
     resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
     engines: {node: '>=8'}
 
-  oauth2-mock-server@8.2.3:
-    resolution: {integrity: sha512-Lgem1ZjVYG6NuzJ7J6MC2OchMkJWzwb1SFvwuGunQ1VPmQIU+/ydG3LzgBu/cnFWriYD8ZTd2CQpjHtvcVZy3A==}
-    engines: {node: ^20.19 || ^22.12 || ^24}
+  oauth2-mock-server@9.1.0:
+    resolution: {integrity: sha512-1Aug6KQhD9IoxyCogFb0XQqovSOhkvOSRUz5Zm98o96H4omt1HEbUMxwzgwl7GO42eh+BqBH/uCbcKIxi4OBbg==}
+    engines: {node: ^22.12 || ^24 || ^26}
     hasBin: true
 
   oauth4webapi@3.8.6:
@@ -10268,15 +10268,11 @@ snapshots:
     dependencies:
       path-key: 3.1.1
 
-  oauth2-mock-server@8.2.3:
+  oauth2-mock-server@9.1.0:
     dependencies:
       basic-auth: 2.0.1
-      cors: 2.8.6
-      express: 5.2.1
       is-plain-obj: 4.1.0
       jose: 6.2.3
-    transitivePeerDependencies:
-      - supports-color
 
   oauth4webapi@3.8.6: {}
 
