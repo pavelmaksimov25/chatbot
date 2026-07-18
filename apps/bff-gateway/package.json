@@ -37,7 +37,7 @@
     "@opentelemetry/instrumentation-ioredis": "^0.67.0",
     "@opentelemetry/instrumentation-pino": "^0.65.0",
     "@opentelemetry/instrumentation-undici": "^0.29.0",
-    "@opentelemetry/sdk-node": "^0.219.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "connect-redis": "^9.0.0",
     "express-session": "^1.19.0",
     "ioredis": "^5.11.1",
