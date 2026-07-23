@@ -27,7 +27,7 @@
     "testEnvironment": "node"
   },
   "dependencies": {
-    "@nestjs/common": "^11.1.26",
+    "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.26",
     "@nestjs/platform-express": "^11.1.27",
     "@nestjs/terminus": "^11.1.1",
